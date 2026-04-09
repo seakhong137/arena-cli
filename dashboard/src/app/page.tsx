@@ -544,6 +544,8 @@ function SystemPage() {
   const [dryRun, setDryRun] = useState(true);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ paused: false, activeScan: false });
   const [confluenceThreshold, setConfluenceThreshold] = useState(3);
+  const [agentCount, setAgentCount] = useState(10);
+  const [scanDetails, setScanDetails] = useState<any[]>([]);
 
   const assets = ['all', 'FX:XAUUSD', 'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY'];
 
@@ -567,13 +569,14 @@ function SystemPage() {
   const handleTriggerScan = async () => {
     setScanning(true);
     setScanResult(null);
+    setScanDetails([]);
 
     try {
       const asset = selectedAsset === 'all' ? undefined : selectedAsset;
       const res = await fetch('http://localhost:3101/api/trigger-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asset, dryRun }),
+        body: JSON.stringify({ asset, dryRun, verbose: true, agents: agentCount }),
       });
 
       if (res.ok) {
@@ -582,6 +585,10 @@ function SystemPage() {
           .map((r: any) => `${r.asset}: ${r.approved} approved, ${r.suppressed} suppressed`)
           .join(' | ');
         setScanResult(`✅ Scan complete — ${dryRun ? '[DRY RUN] ' : ''}${summary}`);
+        // Store detailed agent responses for display
+        if (data.results[0]?.agentDetails) {
+          setScanDetails(data.results[0].agentDetails);
+        }
       } else {
         const err = await res.json();
         setScanResult(`❌ Error: ${err.error}`);
@@ -688,6 +695,27 @@ function SystemPage() {
         </div>
       </div>
 
+      {/* Agent Count Selector */}
+      <div className="mb-6 rounded-lg border border-indigo-800 bg-indigo-950/50 p-5">
+        <h3 className="mb-2 font-semibold text-indigo-300">🤖 Active Agents: {agentCount}/10</h3>
+        <p className="mb-3 text-sm text-gray-400">Number of agents to run per scan. Use fewer for faster testing.</p>
+        <div className="flex items-center gap-2">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(val => (
+            <button
+              key={val}
+              onClick={() => setAgentCount(val)}
+              className={`rounded-lg w-10 h-10 text-sm font-medium transition-colors ${
+                agentCount === val
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              {val}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Manual Scan Trigger */}
       <div className="mb-6 rounded-lg border border-blue-800 bg-blue-950/50 p-5">
         <h3 className="mb-3 font-semibold text-blue-300">🔔 Manual Scan Trigger</h3>
@@ -751,6 +779,72 @@ function SystemPage() {
           </div>
         )}
       </div>
+
+      {/* Agent Thinking Details */}
+      {scanDetails.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gray-800 bg-gray-900">
+          <div className="border-b border-gray-800 px-6 py-4">
+            <h3 className="font-semibold">🧠 Agent Thinking — Last Scan Results</h3>
+            <p className="text-sm text-gray-400">How each agent analyzed the market and what they decided</p>
+          </div>
+          <div className="divide-y divide-gray-800">
+            {scanDetails.map((agent: any, i: number) => {
+              const resp = agent.response;
+              const isSignal = typeof resp === 'object';
+              return (
+                <div key={i} className={`p-5 ${isSignal ? 'bg-green-900/10' : 'bg-gray-800/20'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-sm font-bold">{agent.id}</span>
+                      <span className="text-sm text-gray-400">{agent.strategy}</span>
+                      {isSignal ? (
+                        <span className="rounded bg-green-700 px-2 py-0.5 text-xs text-white">✅ SIGNAL — {(resp as any).direction}</span>
+                      ) : (
+                        <span className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">❌ NO_SIGNAL</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-500">{agent.responseTimeMs}ms</span>
+                  </div>
+
+                  {isSignal && (
+                    <div className="mb-3 grid grid-cols-4 gap-3 text-xs">
+                      <div className="rounded bg-gray-800 px-3 py-2">
+                        <div className="text-gray-500">Entry</div>
+                        <div className="font-bold">{(resp as any).entry}</div>
+                      </div>
+                      <div className="rounded bg-gray-800 px-3 py-2">
+                        <div className="text-gray-500">Stop Loss</div>
+                        <div className="font-bold text-red-300">{(resp as any).stop_loss}</div>
+                      </div>
+                      <div className="rounded bg-gray-800 px-3 py-2">
+                        <div className="text-gray-500">Take Profit</div>
+                        <div className="font-bold text-green-300">{(resp as any).take_profit_1}</div>
+                      </div>
+                      <div className="rounded bg-gray-800 px-3 py-2">
+                        <div className="text-gray-500">R:R Ratio</div>
+                        <div className="font-bold text-yellow-300">{(resp as any).risk_reward_ratio}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {isSignal && (resp as any).rationale && (
+                    <div className="rounded bg-gray-800/50 p-3 text-sm">
+                      <div className="mb-1 text-xs text-gray-500">Agent's Reasoning:</div>
+                      <p className="text-gray-300">{(resp as any).rationale}</p>
+                    </div>
+                  )}
+
+                  {agent.error && (
+                    <div className="rounded bg-red-900/20 p-3 text-sm text-red-300">
+                      ⚠️ Error: {agent.error}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
