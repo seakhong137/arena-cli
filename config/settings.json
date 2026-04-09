@@ -8,73 +8,82 @@
   },
   "scan": {
     "intervalMinutes": 5,
-    "assets": ["FX:XAUUSD", "FX:EURUSD", "FX:GBPUSD", "FX:USDJPY"],
+    "assets": [
+      "FX:XAUUSD",
+      "FX:EURUSD",
+      "FX:GBPUSD",
+      "FX:USDJPY"
+    ],
     "primaryTimeframe": "5",
-    "contextTimeframes": ["15", "60", "240"],
-    "ohlcvCount": 100,
-    "agentTimeoutSeconds": 30
+    "contextTimeframes": [
+      "15",
+      "60",
+      "240"
+    ],
+    "ohlcvCount": 50,
+    "agentTimeoutSeconds": 180
   },
   "agents": {
     "initial": [
       {
         "id": "AGENT-01",
-        "strategy": "ICT Concepts",
+        "strategy": "NyamPip",
         "promptFile": "ict_concepts.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-02",
-        "strategy": "Smart Money Concepts",
+        "strategy": "DekTrade",
         "promptFile": "smc.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-03",
-        "strategy": "Support & Resistance",
+        "strategy": "LengFX",
         "promptFile": "support_resistance.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-04",
-        "strategy": "RSI + Price Action",
+        "strategy": "LazyTrader",
         "promptFile": "rsi_price_action.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-05",
-        "strategy": "MACD Momentum",
+        "strategy": "SaorchSell 😂",
         "promptFile": "macd_momentum.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-06",
-        "strategy": "Trend Following",
+        "strategy": "LoyLong",
         "promptFile": "trend_following.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-07",
-        "strategy": "Breakout Hunter",
+        "strategy": "OtLuyShort 💀",
         "promptFile": "breakout_hunter.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-08",
-        "strategy": "Mean Reversion",
+        "strategy": "HotMargin",
         "promptFile": "mean_reversion.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-09",
-        "strategy": "Volatility Squeeze",
+        "strategy": "RotSL (stop loss runner 😆)",
         "promptFile": "volatility_squeeze.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       },
       {
         "id": "AGENT-10",
-        "strategy": "Multi-Confluence",
+        "strategy": "ChnganhProfit",
         "promptFile": "multi_confluence.json",
-        "model": "qwen-vl-plus"
+        "model": "qwen3.6-plus"
       }
     ]
   },
@@ -83,17 +92,18 @@
     "maxDailySignalsPerAgent": 5,
     "minRiskRewardRatio": 1.5,
     "minConfidencePct": 55,
-    "volatilityAtrMultiplier": 2.0,
+    "volatilityAtrMultiplier": 2,
     "maxCorrelatedUsdSignals": 3,
     "duplicateGuardMinutes": 15
   },
+  "confluenceThreshold": 2,
   "elimination": {
     "schedule": "0 23 * * 0",
     "minWeeklySignals": 5,
     "winRateThreshold": 40,
-    "profitFactorThreshold": 1.0,
+    "profitFactorThreshold": 1,
     "maxDrawdownThreshold": 10,
-    "mutationModel": "qwen-vl-plus"
+    "mutationModel": "qwen3.6-plus"
   },
   "telegram": {
     "enabled": false,

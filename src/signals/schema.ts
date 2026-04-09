@@ -129,3 +129,25 @@ export const chatMessages = sqliteTable('chat_messages', {
   timestamp: integer('timestamp', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
   scanCycleId: text('scan_cycle_id'), // which scan cycle this belongs to
 });
+
+// ── Agent Scan Results Table ───────────────────────
+
+export const agentScanResults = sqliteTable('agent_scan_results', {
+  id: text('id').primaryKey(),
+  scanCycleId: text('scan_cycle_id').notNull(),
+  agentId: text('agent_id').notNull(),
+  agentName: text('agent_name').notNull(),
+  asset: text('asset').notNull(),
+  response: text('response').notNull(), // 'NO_SIGNAL' or JSON string
+  isSignal: integer('is_signal').notNull().default(0), // 0 or 1
+  direction: text('direction'), // BUY, SELL, or null
+  entry: real('entry'),
+  stopLoss: real('stop_loss'),
+  takeProfit1: real('take_profit_1'),
+  riskRewardRatio: real('risk_reward_ratio'),
+  confidence: integer('confidence'),
+  rationale: text('rationale'), // Agent's analysis narrative
+  responseTimeMs: integer('response_time_ms').notNull(),
+  riskApproved: integer('risk_approved').notNull().default(0), // 0 or 1
+  timestamp: integer('timestamp', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+});

@@ -1,0 +1,11 @@
+## Qwen Added Memories
+- The TradingView MCP server is located at /Users/khong/ai-cli/tradingview-mcp and uses stdio transport via @modelcontextprotocol/sdk. The MCP client provides tools: chart_set_symbol, chart_set_timeframe, capture_screenshot, data_get_ohlcv, data_get_study_values, quote_get, chart_get_state.
+- For MACD analysis on USDJPY, need to: 1) Set symbol to FX:USDJPY, 2) Set timeframe (default 15min), 3) Get chart state to check indicators, 4) Get OHLCV data (100 bars), 5) Get MACD indicator values, 6) Get EMA 50 values, 7) Analyze crossover, histogram divergence, zero line position, trend alignment, 8) Determine valid signal based on criteria: MACD crossover confirmed, histogram supports direction, price vs EMA50 alignment, entry on MACD candle close, min R:R 1.5
+- Creating standalone TypeScript analysis script to connect to TradingView MCP via stdio, fetch chart data, and perform MACD momentum analysis on FX:USDJPY
+- Script will be created at /Users/khong/ai-cli/arena-cli/scripts/macd-analysis.ts and will use the MCP client functions to fetch data and perform analysis
+- Creating MACD analysis script at scripts/macd-analysis.ts that will: 1) Connect to TradingView MCP, 2) Set FX:USDJPY symbol, 3) Fetch chart state, OHLCV data, indicator values, 4) Analyze MACD crossover, histogram, zero line, EMA50 alignment, 5) Output structured analysis report with signal or NO_SIGNAL
+- The script will use tsx to run directly without needing to build the entire project, using the existing MCP client infrastructure
+- Creating the script now at scripts/macd-analysis.ts with all required analysis logic
+- SCRIPT CREATED: /Users/khong/ai-cli/arena-cli/scripts/macd-analysis.ts - Standalone MACD momentum analysis script for FX:USDJPY using TradingView MCP
+- Creating MACD analysis script. Will execute via tsx to connect to TradingView MCP server at /Users/khong/ai-cli/tradingview-mcp via stdio transport.
+- Need to create file at /Users/khong/ai-cli/arena-cli/scripts/macd-analysis.ts with content that imports MCP client, connects, fetches FX:USDJPY data, analyzes MACD, outputs report

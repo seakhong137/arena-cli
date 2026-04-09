@@ -48,20 +48,30 @@ export function loadStrategyPrompt(promptFile: string): string {
  * Run all active agents against the same input data
  * Returns results for each agent
  */
-export async function runAllAgents(input: PayloadInput): Promise<AgentPoolResult[]> {
+export async function runAllAgents(input: PayloadInput, verbose = false, maxAgents?: number): Promise<AgentPoolResult[]> {
   const logger = getLogger();
-  const agents = getActiveAgents();
+  const allAgents = getActiveAgents();
+  const agents = maxAgents ? allAgents.slice(0, maxAgents) : allAgents;
   const results: AgentPoolResult[] = [];
 
-  logger.info({ msg: `Running ${agents.length} agents...`, asset: input.asset });
+  logger.info({ msg: `Running ${agents.length} agents...`, asset: input.asset, verbose, maxAgents });
 
-  // Run agents sequentially (as per PRD)
-  for (const agentDef of agents) {
+  if (verbose) {
+    logger.info({
+      msg: 'Payload preview',
+      ohlcvCount: input.ohlcv?.length || 0,
+      hasQuote: !!input.quote,
+    });
+  }
+
+  // Run agents sequentially with delay to avoid API rate limiting
+  for (let i = 0; i < agents.length; i++) {
+    const agentDef = agents[i];
     try {
       const systemPrompt = loadStrategyPrompt(agentDef.promptFile);
       const payload = buildAgentPayload(input, systemPrompt);
 
-      const result = await runAgent(agentDef.id, payload, agentDef.model);
+      const result = await runAgent(agentDef.id, payload, agentDef.model, undefined, verbose);
 
       results.push({
         agentId: agentDef.id,
@@ -70,6 +80,19 @@ export async function runAllAgents(input: PayloadInput): Promise<AgentPoolResult
         responseTimeMs: result.responseTimeMs,
         error: result.error,
       });
+
+      if (verbose) {
+        logger.info({
+          msg: `${agentDef.strategy} result`,
+          response: typeof result.response === 'string' ? result.response : JSON.stringify(result.response).substring(0, 200),
+          rawOutput: result.rawOutput?.substring(0, 300) || '(none)',
+        });
+      }
+
+      // Add delay between agents to avoid API rate limiting (skip after last agent)
+      if (i < agents.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
     } catch (error: any) {
       logger.error({
         msg: `Agent ${agentDef.id} failed`,

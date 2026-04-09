@@ -16,6 +16,8 @@ import { runEliminationCycle } from '../elimination/weeklyEngine.js';
 import { mutateAgent } from '../elimination/mutationEngine.js';
 import { initTelegram } from '../telegram/bot.js';
 import { runPreSignalDebate, runEliminationCeremony, postSessionStart, postSessionEnd } from '../signals/chatEngine.js';
+import { getActiveAgents } from '../agents/agentPool.js';
+import { getState } from '../shared/systemState.js';
 import { randomUUID } from 'crypto';
 import cron from 'node-cron';
 import type { Signal, AgentResponse, ScanCycleResult } from '../shared/types.js';
@@ -69,6 +71,13 @@ export async function startOrchestrator(opts: OrchestratorOptions): Promise<void
       return;
     }
 
+    // Check if system is paused
+    const state = getState();
+    if (state.paused) {
+      logger.debug('System is paused — skipping scan cycle');
+      return;
+    }
+
     if (!sessionActive) {
       // Session just started
       logger.info('🔔 NY session started — agents active');
@@ -88,8 +97,8 @@ export async function startOrchestrator(opts: OrchestratorOptions): Promise<void
 
     if (result.eliminatedAgent) {
       // Get surviving agents
-      const allAgents = require('../agents/agentPool.js').getActiveAgents();
-      const survivingAgents = allAgents.filter((a: any) => a.id !== result.eliminatedAgent);
+      const allAgents = getActiveAgents();
+      const survivingAgents = allAgents.filter((a) => a.id !== result.eliminatedAgent);
 
       // Run elimination ceremony
       await runEliminationCeremony(
@@ -161,7 +170,7 @@ async function runScanCycle(opts: OrchestratorOptions): Promise<void> {
 
       // Step 1.5: Pre-signal debate
       const scanCycleId = randomUUID();
-      const agents = require('../agents/agentPool.js').getActiveAgents();
+      const agents = getActiveAgents();
       const chartContext = `${asset} at ${assetData.quote?.last || 'N/A'} | OHLCV: ${assetData.ohlcv.length} candles | Indicators: ${Object.keys(assetData.indicators).length} loaded`;
 
       await runPreSignalDebate(agents, asset, chartContext, scanCycleId);

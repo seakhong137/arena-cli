@@ -9,16 +9,16 @@ import { loadConfig } from '../shared/config.js';
 import { getLogger } from '../shared/logger.js';
 
 const INITIAL_AGENTS = [
-  { id: 'AGENT-01', strategy: 'ICT Concepts', promptFile: 'ict_concepts.json' },
-  { id: 'AGENT-02', strategy: 'Smart Money Concepts', promptFile: 'smc.json' },
-  { id: 'AGENT-03', strategy: 'Support & Resistance', promptFile: 'support_resistance.json' },
-  { id: 'AGENT-04', strategy: 'RSI + Price Action', promptFile: 'rsi_price_action.json' },
-  { id: 'AGENT-05', strategy: 'MACD Momentum', promptFile: 'macd_momentum.json' },
-  { id: 'AGENT-06', strategy: 'Trend Following', promptFile: 'trend_following.json' },
-  { id: 'AGENT-07', strategy: 'Breakout Hunter', promptFile: 'breakout_hunter.json' },
-  { id: 'AGENT-08', strategy: 'Mean Reversion', promptFile: 'mean_reversion.json' },
-  { id: 'AGENT-09', strategy: 'Volatility Squeeze', promptFile: 'volatility_squeeze.json' },
-  { id: 'AGENT-10', strategy: 'Multi-Confluence', promptFile: 'multi_confluence.json' },
+  { id: 'AGENT-01', strategy: 'NyamPip', promptFile: 'ict_concepts.json' },
+  { id: 'AGENT-02', strategy: 'DekTrade', promptFile: 'smc.json' },
+  { id: 'AGENT-03', strategy: 'LengFX', promptFile: 'support_resistance.json' },
+  { id: 'AGENT-04', strategy: 'LazyTrader', promptFile: 'rsi_price_action.json' },
+  { id: 'AGENT-05', strategy: 'SaorchSell 😂', promptFile: 'macd_momentum.json' },
+  { id: 'AGENT-06', strategy: 'LoyLong', promptFile: 'trend_following.json' },
+  { id: 'AGENT-07', strategy: 'OtLuyShort 💀', promptFile: 'breakout_hunter.json' },
+  { id: 'AGENT-08', strategy: 'HotMargin', promptFile: 'mean_reversion.json' },
+  { id: 'AGENT-09', strategy: 'RotSL 😆', promptFile: 'volatility_squeeze.json' },
+  { id: 'AGENT-10', strategy: 'ChnganhProfit', promptFile: 'multi_confluence.json' },
 ];
 
 async function seed() {

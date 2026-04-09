@@ -164,9 +164,32 @@ export async function runMigrations(): Promise<void> {
       scan_cycle_id TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS agent_scan_results (
+      id TEXT PRIMARY KEY,
+      scan_cycle_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      asset TEXT NOT NULL,
+      response TEXT NOT NULL,
+      is_signal INTEGER NOT NULL DEFAULT 0,
+      direction TEXT,
+      entry REAL,
+      stop_loss REAL,
+      take_profit_1 REAL,
+      risk_reward_ratio REAL,
+      confidence INTEGER,
+      rationale TEXT,
+      response_time_ms INTEGER NOT NULL,
+      risk_approved INTEGER NOT NULL DEFAULT 0,
+      timestamp INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chat_messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_chat_agent ON chat_messages(agent_id);
     CREATE INDEX IF NOT EXISTS idx_chat_cycle ON chat_messages(scan_cycle_id);
+    CREATE INDEX IF NOT EXISTS idx_scan_results_agent ON agent_scan_results(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_scan_results_cycle ON agent_scan_results(scan_cycle_id);
+    CREATE INDEX IF NOT EXISTS idx_scan_results_timestamp ON agent_scan_results(timestamp);
 
     CREATE INDEX IF NOT EXISTS idx_signals_agent_id ON signals(agent_id);
     CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);

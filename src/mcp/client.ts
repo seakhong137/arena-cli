@@ -18,18 +18,17 @@ let transport: StdioClientTransport | null = null;
 export async function connectMcp(): Promise<Client> {
   if (mcpClient) return mcpClient;
 
-  const config = loadConfig();
-  const rootDir = getRootDir();
   const logger = getLogger();
 
-  const mcpServerDir = join(rootDir, config.scan.assets.length > 0 ? process.env.MCP_SERVER_DIR || '/Users/khong/ai-cli/tradingview-mcp' : '/Users/khong/ai-cli/tradingview-mcp');
+  // Use absolute path — TradingView MCP must be at this location
+  const mcpDir = process.env.MCP_SERVER_DIR || '/Users/khong/ai-cli/tradingview-mcp';
 
-  logger.info({ msg: 'Connecting to TradingView MCP server', dir: mcpServerDir });
+  logger.info({ msg: 'Connecting to TradingView MCP server', dir: mcpDir });
 
   transport = new StdioClientTransport({
     command: 'node',
-    args: [join(mcpServerDir, 'src', 'server.js')],
-    cwd: mcpServerDir,
+    args: [join(mcpDir, 'src', 'server.js')],
+    cwd: mcpDir,
   });
 
   mcpClient = new Client(
@@ -196,61 +195,99 @@ export async function fetchAssetData(
   // Set symbol and primary timeframe
   const client = await connectMcp();
 
-  await client.callTool({
-    name: 'chart_set_symbol',
-    arguments: { symbol },
+  try {
+    await client.callTool({
+      name: 'chart_set_symbol',
+      arguments: { symbol },
+    });
+  } catch (error: any) {
+    logger.error({ msg: `Failed to set symbol ${symbol}`, error: error.message });
+  }
+
+  try {
+    await client.callTool({
+      name: 'chart_set_timeframe',
+      arguments: { timeframe: primaryTimeframe },
+    });
+  } catch (error: any) {
+    logger.error({ msg: `Failed to set timeframe ${primaryTimeframe}`, error: error.message });
+  }
+
+  // Fetch all data in parallel with error handling
+  const results = await Promise.allSettled([
+    client.callTool({
+      name: 'capture_screenshot',
+      arguments: { region: 'chart', method: 'cdp' },
+    }),
+    client.callTool({
+      name: 'data_get_ohlcv',
+      arguments: { count: ohlcvCount, summary: false },
+    }),
+    client.callTool({
+      name: 'data_get_study_values',
+      arguments: {},
+    }),
+    client.callTool({
+      name: 'quote_get',
+      arguments: { symbol },
+    }),
+    client.callTool({
+      name: 'chart_get_state',
+      arguments: {},
+    }),
+  ]);
+
+  const screenshotResult = results[0];
+  const ohlcvResult = results[1];
+  const indicatorsResult = results[2];
+  const quoteResult = results[3];
+  const chartStateResult = results[4];
+
+  function extractResult(r: PromiseSettledResult<any>): any {
+    if (r.status === 'fulfilled') return r.value;
+    logger.warn({ msg: 'MCP call rejected', reason: (r as PromiseRejectedResult).reason });
+    return null;
+  }
+
+  function extractText(r: PromiseSettledResult<any>): string | null {
+    if (r.status !== 'fulfilled') return null;
+    const val = (r as PromiseFulfilledResult<any>).value;
+    return val?.content?.[0]?.text || null;
+  }
+
+  function extractData(r: PromiseSettledResult<any>): string | null {
+    if (r.status !== 'fulfilled') return null;
+    const val = (r as PromiseFulfilledResult<any>).value;
+    return val?.content?.[0]?.data || val?.content?.[0]?.text || null;
+  }
+
+  const screenshot = extractData(screenshotResult) || '';
+
+  const ohlcvText = extractText(ohlcvResult);
+  const ohlcvRaw = ohlcvText ? JSON.parse(ohlcvText) : null;
+
+  // Extract bars array from MCP response (may be { bars: [...] } or [...] directly)
+  const ohlcv = Array.isArray(ohlcvRaw)
+    ? ohlcvRaw
+    : (ohlcvRaw?.bars || ohlcvRaw?.data || ohlcvRaw?.candles || []);
+
+  logger.info({
+    msg: 'OHLCV fetch result',
+    ohlcvLength: ohlcv.length,
+    hasText: !!ohlcvText,
+    textPreview: ohlcvText?.substring(0, 100) || '(empty)',
+    rawType: ohlcvRaw ? typeof ohlcvRaw : 'null',
+    rawKeys: ohlcvRaw && typeof ohlcvRaw === 'object' ? Object.keys(ohlcvRaw) : [],
   });
 
-  await client.callTool({
-    name: 'chart_set_timeframe',
-    arguments: { timeframe: primaryTimeframe },
-  });
+  const indicatorsText = extractText(indicatorsResult);
+  const indicators = indicatorsText ? JSON.parse(indicatorsText) : {};
 
-  // Fetch all data in parallel
-  const [screenshotResult, ohlcvResult, indicatorsResult, quoteResult, chartStateResult] =
-    await Promise.all([
-      client.callTool({
-        name: 'capture_screenshot',
-        arguments: { region: 'chart', method: 'cdp' },
-      }),
-      client.callTool({
-        name: 'data_get_ohlcv',
-        arguments: { count: ohlcvCount, summary: false },
-      }),
-      client.callTool({
-        name: 'data_get_study_values',
-        arguments: {},
-      }),
-      client.callTool({
-        name: 'quote_get',
-        arguments: { symbol },
-      }),
-      client.callTool({
-        name: 'chart_get_state',
-        arguments: {},
-      }),
-    ]);
+  const quoteText = extractText(quoteResult);
+  const quote = quoteText ? JSON.parse(quoteText) : null;
 
-  const screenshot =
-    (screenshotResult as any).content?.[0]?.data ||
-    (screenshotResult as any).content?.[0]?.text ||
-    '';
-
-  const ohlcv = ohlcvResult
-    ? JSON.parse((ohlcvResult as any).content?.[0]?.text || '[]')
-    : [];
-
-  const indicators = indicatorsResult
-    ? JSON.parse((indicatorsResult as any).content?.[0]?.text || '{}')
-    : {};
-
-  const quote = quoteResult
-    ? JSON.parse((quoteResult as any).content?.[0]?.text || 'null')
-    : null;
-
-  const chartState = chartStateResult
-    ? JSON.parse((chartStateResult as any).content?.[0]?.text || 'null')
-    : null;
+  const chartStateText = extractText(chartStateResult);
+  const chartState = chartStateText ? JSON.parse(chartStateText) : null;
 
   return {
     screenshot,

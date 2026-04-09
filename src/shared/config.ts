@@ -17,6 +17,7 @@ export interface ArenaConfig {
   scan: ScanConfig;
   agents: AgentConfig;
   riskManager: RiskManagerConfig;
+  confluenceThreshold: number;
   elimination: EliminationConfig;
   telegram: TelegramConfig;
   database: DatabaseConfig;
@@ -135,6 +136,9 @@ export function loadConfig(): ArenaConfig {
   }
   if (process.env.AI_CLI_TIMEOUT) {
     config.scan.agentTimeoutSeconds = parseInt(process.env.AI_CLI_TIMEOUT, 10);
+  }
+  if (process.env.CONFLUENCE_THRESHOLD) {
+    config.confluenceThreshold = parseInt(process.env.CONFLUENCE_THRESHOLD, 10);
   }
 
   return config;

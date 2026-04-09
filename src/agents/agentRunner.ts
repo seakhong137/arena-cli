@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import { loadConfig, getRootDir } from '../shared/config.js';
 import { getLogger } from '../shared/logger.js';
 import type { AgentPayload } from '../mcp/payloadBuilder.js';
-import type { AgentResponse } from '../shared/types.js';
+import type { AgentResponse, Signal } from '../shared/types.js';
 import { SignalSchema } from '../shared/types.js';
 
 /**
@@ -20,11 +20,13 @@ export async function runAgent(
   agentId: string,
   payload: AgentPayload,
   model?: string,
-  timeoutSeconds?: number
+  timeoutSeconds?: number,
+  verbose = false
 ): Promise<{
   response: AgentResponse;
   responseTimeMs: number;
   error?: string;
+  rawOutput?: string;
 }> {
   const config = loadConfig();
   const logger = getLogger();
@@ -32,7 +34,7 @@ export async function runAgent(
   const startTime = Date.now();
 
   const cliPath = process.env.AI_CLI_PATH || 'qwen';
-  const cliModel = model || process.env.AI_CLI_MODEL || 'qwen-vl-plus';
+  const cliModel = model || process.env.AI_CLI_MODEL || 'qwen3.6-plus';
   const cliApproval = process.env.AI_CLI_APPROVAL_MODE || 'yolo';
   const timeout = (timeoutSeconds || config.scan.agentTimeoutSeconds) * 1000;
 
@@ -42,27 +44,29 @@ export async function runAgent(
     timeout: `${timeout / 1000}s`,
   });
 
-  // Write payload to temp file for qwen CLI to read
-  const tempDir = join(rootDir, 'data', 'temp');
-  if (!existsSync(tempDir)) {
-    mkdirSync(tempDir, { recursive: true });
-  }
-
-  const payloadFile = join(tempDir, `${agentId}-${randomUUID()}.json`);
-
-  // Build the prompt for qwen CLI
-  // qwen CLI doesn't directly accept base64 images via stdin, so we write to temp file
-  const promptContent = buildQwenPrompt(payload);
-  writeFileSync(payloadFile, promptContent, 'utf-8');
+  // Build text-only prompt (no image — qwen CLI doesn't support large base64 args)
+  const promptContent = buildQwenPrompt({
+    systemPrompt: payload.systemPrompt,
+    userPrompt: payload.userPrompt,
+  });
 
   try {
-    // Run qwen CLI with the payload file
-    const result = await runQwenCli(cliPath, cliModel, cliApproval, payloadFile, timeout);
+    // Run qwen CLI with the prompt content as positional argument
+    const result = await runQwenCli(cliPath, cliModel, cliApproval, promptContent, timeout);
 
     const responseTimeMs = Date.now() - startTime;
 
     // Parse the response
     const parsed = parseAgentResponse(result.stdout);
+
+    if (verbose) {
+      logger.info({
+        msg: `Agent ${agentId} verbose output`,
+        rawOutput: result.stdout || '(empty)',
+        rawError: result.stderr?.substring(0, 200) || '',
+        exitCode: result.code,
+      });
+    }
 
     logger.info({
       msg: `Agent ${agentId} complete`,
@@ -73,6 +77,7 @@ export async function runAgent(
     return {
       response: parsed,
       responseTimeMs,
+      rawOutput: result.stdout?.substring(0, 1000),
     };
   } catch (error: any) {
     const responseTimeMs = Date.now() - startTime;
@@ -87,27 +92,15 @@ export async function runAgent(
       responseTimeMs,
       error: error.message,
     };
-  } finally {
-    // Cleanup temp file
-    if (existsSync(payloadFile)) {
-      unlinkSync(payloadFile);
-    }
   }
 }
 
 /**
- * Build the prompt file content for qwen CLI
- * Includes system prompt + user payload + image reference
+ * Build the text prompt for qwen CLI
  */
 function buildQwenPrompt(payload: AgentPayload): string {
   let content = `<system>\n${payload.systemPrompt}\n</system>\n\n`;
   content += payload.userPrompt;
-
-  if (payload.imageBase64) {
-    // Add image as base64 data reference
-    content += `\n\n[Chart Image - base64 encoded]\n${payload.imageBase64}`;
-  }
-
   return content;
 }
 
@@ -118,29 +111,29 @@ function runQwenCli(
   cliPath: string,
   model: string,
   approvalMode: string,
-  payloadFile: string,
+  promptContent: string,
   timeout: number
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Agent timed out after ${timeout / 1000}s`));
-    }, timeout);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-    // Read payload file content and pass to qwen CLI
     const args = [
-      '-p',
-      `Please analyze the trading chart and respond with either a Signal JSON or NO_SIGNAL. Read the full prompt from: ${payloadFile}`,
       '--model',
       model,
       '--approval-mode',
       approvalMode,
+      promptContent,
     ];
 
     const child = spawn(cliPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
     });
+
+    timeoutId = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`Agent timed out after ${timeout / 1000}s`));
+    }, timeout);
 
     let stdout = '';
     let stderr = '';
@@ -167,41 +160,127 @@ function runQwenCli(
 
 /**
  * Parse agent response: extract Signal JSON or detect NO_SIGNAL
+ * Also handles markdown table format and free-text signals
  */
 function parseAgentResponse(output: string): AgentResponse {
   const logger = getLogger();
 
-  // Check for NO_SIGNAL
-  if (output.includes('NO_SIGNAL') || output.includes('NO SIGNAL')) {
+  // Check for explicit NO_SIGNAL
+  if (output.trim().toUpperCase() === 'NO_SIGNAL' || output.trim().toUpperCase() === 'NO_SIGNAL (CHOPPY)') {
     return 'NO_SIGNAL';
   }
 
   // Try to extract JSON from output
   const jsonMatch = extractJson(output);
-  if (!jsonMatch) {
-    logger.warn({ msg: 'Failed to parse agent response as JSON', output: output.slice(0, 200) });
-    return 'NO_SIGNAL';
-  }
+  if (jsonMatch) {
+    try {
+      let parsed = JSON.parse(jsonMatch);
+      // Map agent output format to SignalSchema format
+      if (parsed.signal) {
+        parsed.direction = parsed.signal === 'LONG' ? 'BUY' : 'SELL';
+        delete parsed.signal;
+      }
+      // Map field names: sl → stop_loss, tp1 → take_profit_1, etc.
+      if (parsed.sl !== undefined) { parsed.stop_loss = parsed.sl; delete parsed.sl; }
+      if (parsed.tp1 !== undefined) { parsed.take_profit_1 = parsed.tp1; delete parsed.tp1; }
+      if (parsed.tp2 !== undefined) { parsed.take_profit_2 = parsed.tp2; delete parsed.tp2; }
+      if (parsed.rr !== undefined) { parsed.risk_reward_ratio = parsed.rr; delete parsed.rr; }
+      if (parsed.entry === undefined && parsed.price) { parsed.entry = parsed.price; delete parsed.price; }
+      // Add defaults for missing fields
+      if (!parsed.agent_id) parsed.agent_id = 'UNKNOWN';
+      if (!parsed.strategy) parsed.strategy = 'UNKNOWN';
+      if (!parsed.asset) parsed.asset = 'UNKNOWN';
+      if (!parsed.timeframe) parsed.timeframe = '5M';
+      if (!parsed.session) parsed.session = 'New York';
+      if (!parsed.status) parsed.status = 'OPEN';
+      if (!parsed.position_size_pct) parsed.position_size_pct = 1.0;
+      if (!parsed.confidence_pct) parsed.confidence_pct = parsed.checklistScore ? Math.min(parsed.checklistScore * 15, 95) : 55;
+      if (!parsed.timestamp) parsed.timestamp = new Date().toISOString();
+      if (!parsed.invalidation) parsed.invalidation = `Close beyond ${parsed.stop_loss || 'N/A'}`;
+      if (!parsed.rationale) parsed.rationale = parsed.narrative || output.substring(0, 200);
 
-  try {
-    const parsed = JSON.parse(jsonMatch);
-
-    // Validate against SignalSchema
-    const result = SignalSchema.safeParse(parsed);
-    if (result.success) {
-      return result.data;
+      const result = SignalSchema.safeParse(parsed);
+      if (result.success) {
+        return result.data;
+      }
+      logger.warn({ msg: 'Schema validation failed', errors: result.error.errors.slice(0, 3) });
+    } catch {
+      // Continue to text parsing
     }
-
-    logger.warn({
-      msg: 'Signal validation failed',
-      errors: result.error.errors,
-    });
-
-    return 'NO_SIGNAL';
-  } catch (error) {
-    logger.warn({ msg: 'JSON parse error', error });
-    return 'NO_SIGNAL';
   }
+
+  // Try to extract signal from markdown table format
+  const textSignal = extractSignalFromText(output);
+  if (textSignal) {
+    return textSignal;
+  }
+
+  // Check if output contains signal-like content
+  if (/signal.*(short|long|buy|sell)/i.test(output) && /entry.*\d/i.test(output)) {
+    const textSignal2 = extractSignalFromText(output);
+    if (textSignal2) return textSignal2;
+  }
+
+  logger.warn({ msg: 'Failed to parse agent response as JSON', output: output.substring(0, 200) });
+  return 'NO_SIGNAL';
+}
+
+/**
+ * Extract signal parameters from markdown/text output
+ */
+function extractSignalFromText(output: string): Signal | null {
+  // Match markdown table format: | Entry | 4763.00 |
+  const entryMatch = output.match(/\|\s*Entry\s*\|\s*([\d.]+)/);
+  const slMatch = output.match(/\|\s*SL\s*\|\s*([\d.]+)/);
+  const tp1Match = output.match(/\|\s*TP1\s*\|\s*([\d.]+)/);
+  const tp2Match = output.match(/\|\s*TP2\s*\|\s*([\d.]+)/);
+  const rrMatch = output.match(/\|\s*R:[Rr]\s*\|\s*([\d.]+)/);
+
+  // Also match inline format: Entry: 4763.00, SL: 4773.50
+  const entryInline = output.match(/[Ee]ntry\s*[:=]\s*([\d.]+)/);
+  const slInline = output.match(/[Ss]top\s+[Ll]oss\s*[:=]\s*([\d.]+)|\|\s*SL\s*\|\s*([\d.]+)/);
+  const tp1Inline = output.match(/[Tt][Pp]1\s*[:=]\s*([\d.]+)/);
+
+  const entry = entryMatch || entryInline;
+  const sl = slMatch || slInline;
+  const tp1 = tp1Match || tp1Inline;
+  const rr = rrMatch;
+  const direction = output.match(/\*\*(SHORT|LONG)\*\*|(SHORT|long|LONG|short)\s*signal|signal\s*confirmed.*?(SHORT|LONG)/i);
+
+  if (entry && sl && tp1 && direction) {
+    const entryVal = parseFloat(entry[1].replace(/,/g, ''));
+    const slVal = parseFloat((sl[1] || sl[2] || '0').replace(/,/g, ''));
+    const tp1Val = parseFloat(tp1[1].replace(/,/g, ''));
+    const rrVal = rr ? parseFloat(rr[1]) : Math.abs((tp1Val - entryVal) / Math.abs(entryVal - slVal));
+    const dir = (direction[1] || direction[2] || direction[3] || '').toUpperCase() === 'SHORT' ? 'SELL' : 'BUY';
+    const tp2Val = tp2Match ? parseFloat(tp2Match[1].replace(/,/g, '')) : (dir === 'BUY' ? entryVal + (tp1Val - entryVal) * 1.5 : entryVal - (entryVal - tp1Val) * 1.5);
+
+    // Extract narrative from output
+    const lines = output.split('\n').filter(l => l.trim() && !l.startsWith('|') && !l.startsWith('##') && !l.startsWith('**Step'));
+    const narrative = lines.slice(0, 3).join(' ').substring(0, 300);
+
+    return {
+      agent_id: 'UNKNOWN',
+      strategy: 'UNKNOWN',
+      timestamp: new Date().toISOString(),
+      asset: 'UNKNOWN',
+      timeframe: '5M',
+      direction: dir as 'BUY' | 'SELL',
+      entry: entryVal,
+      stop_loss: slVal,
+      take_profit_1: tp1Val,
+      take_profit_2: tp2Val,
+      risk_reward_ratio: rrVal || Math.round((Math.abs(tp1Val - entryVal) / Math.abs(entryVal - slVal)) * 100) / 100,
+      position_size_pct: 1.0,
+      confidence_pct: 55,
+      session: 'New York',
+      rationale: narrative || 'Signal extracted from text output',
+      invalidation: `Close beyond ${slVal}`,
+      status: 'OPEN',
+    };
+  }
+
+  return null;
 }
 
 /**

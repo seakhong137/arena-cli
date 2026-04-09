@@ -31,6 +31,9 @@ export default function DashboardPage() {
             <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
               10 Agents
             </span>
+            <span className="rounded-full bg-blue-900/50 px-3 py-1 text-xs text-blue-300">
+              Threshold: 3
+            </span>
             <span className="rounded-full bg-yellow-900/50 px-3 py-1 text-xs text-yellow-300">
               Waiting for NY Session
             </span>
@@ -172,40 +175,313 @@ function SignalsPage() {
 
 /* ── Agents Page ──────────────────────────────────── */
 
+interface ScanResult {
+  id: string;
+  agentId: string;
+  agentName: string;
+  asset: string;
+  response: string;
+  isSignal: boolean;
+  direction: string | null;
+  entry: number | null;
+  stopLoss: number | null;
+  takeProfit1: number | null;
+  riskRewardRatio: number | null;
+  confidence: number | null;
+  rationale: string | null;
+  responseTimeMs: number;
+  riskApproved: boolean;
+  timestamp: string;
+}
+
+interface AgentDetail {
+  id: string;
+  strategy: string;
+  promptFile: string;
+  model: string;
+  status: string;
+  version: number;
+  performance: {
+    totalScans: number;
+    totalSignals: number;
+    approvedSignals: number;
+    suppressedSignals: number;
+    avgResponseTime: number;
+    lastScanAt: string | null;
+    lastSignalAt: string | null;
+  };
+  scanResults: ScanResult[];
+  recentAnalysis: ChatMsg[];
+  latestResult: ScanResult | null;
+}
+
 function AgentsPage() {
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [agentTab, setAgentTab] = useState<'analysis' | 'signals' | 'history'>('analysis');
+  const [agentData, setAgentData] = useState<AgentDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchAgentData = async (agentId: string) => {
+    setLoading(true);
+    setSelectedAgent(agentId);
+    setAgentTab('analysis');
+    try {
+      const agentInfo = agents.find(a => a.id === agentId);
+
+      // Fetch stats
+      const statsRes = await fetch(`http://localhost:3101/api/agent/${agentId}/stats`);
+      const stats = statsRes.ok ? (await statsRes.json()).stats : { totalScans: 0, totalSignals: 0, approvedSignals: 0, suppressedSignals: 0, avgResponseTime: 0, lastScanAt: null, lastSignalAt: null };
+
+      // Fetch scan results
+      const resultsRes = await fetch(`http://localhost:3101/api/agent/${agentId}/scan-results?limit=20`);
+      const results = resultsRes.ok ? (await resultsRes.json()).results : [];
+
+      // Fetch latest result
+      const latestRes = await fetch(`http://localhost:3101/api/agent/${agentId}/latest-result?asset=FX:XAUUSD`);
+      const latestResult = latestRes.ok ? (await latestRes.json()).result : null;
+
+      // Fetch chat messages
+      const chatRes = await fetch(`http://localhost:3101/api/chat?limit=50`);
+      const chatData = chatRes.ok ? await chatRes.json() : { messages: [] };
+      const agentMessages = chatData.messages
+        .filter((m: any) => m.agentId === agentId)
+        .slice(-10)
+        .map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
+
+      setAgentData({
+        id: agentId,
+        strategy: agentInfo?.strategy || agentId,
+        promptFile: agentInfo?.promptFile || '',
+        model: 'qwen3.6-plus',
+        status: 'ACTIVE',
+        version: 1,
+        performance: stats,
+        scanResults: results,
+        recentAnalysis: agentMessages,
+        latestResult,
+      });
+    } catch (error) {
+      console.error('Failed to fetch agent data:', error);
+    }
+    setLoading(false);
+  };
+
+  const currentAgent = selectedAgent && agentData ? agentData : null;
+
+  if (!selectedAgent || !currentAgent) {
+    return (
+      <div>
+        <h2 className="mb-4 text-lg font-semibold">Agent Details</h2>
+        <div className="grid grid-cols-2 gap-4">
+          {agents.map((agent) => (
+            <div
+              key={agent.id}
+              onClick={() => fetchAgentData(agent.id)}
+              className="cursor-pointer rounded-lg border border-gray-800 bg-gray-900 p-5 hover:border-blue-600 hover:bg-gray-800/50 transition-colors"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="font-mono text-sm font-bold">{agent.id}</h3>
+                  <p className="text-sm text-gray-400">{agent.strategy}</p>
+                </div>
+                <StatusBadge status="ACTIVE" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <h2 className="mb-4 text-lg font-semibold">Agent Details</h2>
-      <div className="grid grid-cols-2 gap-4">
-        {agents.map((agent) => (
-          <div key={agent.id} className="rounded-lg border border-gray-800 bg-gray-900 p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <div>
-                <h3 className="font-mono text-sm font-bold">{agent.id}</h3>
-                <p className="text-sm text-gray-400">{agent.strategy}</p>
-              </div>
-              <StatusBadge status="ACTIVE" />
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-xs">
-              <div className="rounded bg-gray-800 px-3 py-2">
-                <div className="text-gray-500">Version</div>
-                <div className="font-bold">v1</div>
-              </div>
-              <div className="rounded bg-gray-800 px-3 py-2">
-                <div className="text-gray-500">Signals</div>
-                <div className="font-bold">0</div>
-              </div>
-              <div className="rounded bg-gray-800 px-3 py-2">
-                <div className="text-gray-500">Win Rate</div>
-                <div className="font-bold">--</div>
-              </div>
-            </div>
+      <button onClick={() => setSelectedAgent(null)} className="mb-4 flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300">
+        ← Back to all agents
+      </button>
+
+      {/* Agent Header */}
+      <div className="mb-6 flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900 px-6 py-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold font-mono">{currentAgent.id}</h2>
+            <StatusBadge status={currentAgent.status} />
           </div>
+          <p className="text-sm text-gray-400 mt-1">{currentAgent.strategy} • {currentAgent.model}</p>
+        </div>
+        <div className="grid grid-cols-4 gap-4 text-sm">
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Total Scans</div>
+            <div className="font-bold">{currentAgent.performance.totalScans}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Signals</div>
+            <div className="font-bold text-green-400">{currentAgent.performance.totalSignals}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Approved</div>
+            <div className="font-bold text-blue-400">{currentAgent.performance.approvedSignals}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Avg Time</div>
+            <div className="font-bold">{currentAgent.performance.avgResponseTime}ms</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="mb-4 flex gap-1">
+        {[
+          { id: 'analysis' as const, label: '💬 Analysis', count: currentAgent.recentAnalysis.length },
+          { id: 'signals' as const, label: '📈 Signals', count: currentAgent.scanResults.filter(r => r.isSignal).length },
+          { id: 'history' as const, label: '📋 Scan History', count: currentAgent.scanResults.length },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setAgentTab(tab.id)}
+            className={`rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
+              agentTab === tab.id
+                ? 'bg-gray-900 text-white border-t-2 border-blue-500'
+                : 'text-gray-400 hover:bg-gray-900/50 hover:text-white'
+            }`}
+          >
+            {tab.label} <span className="text-xs text-gray-500">({tab.count})</span>
+          </button>
         ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="rounded-lg border border-gray-800 bg-gray-900">
+        {loading ? (
+          <div className="py-16 text-center text-gray-500">Loading...</div>
+        ) : agentTab === 'analysis' ? (
+          <div className="p-6">
+            <h3 className="mb-3 font-semibold">Recent Analysis (Chat Room)</h3>
+            {currentAgent.recentAnalysis.length > 0 ? (
+              <div className="space-y-3">
+                {currentAgent.recentAnalysis.map((msg, i) => (
+                  <div key={i} className="rounded bg-gray-800/50 p-3 text-sm">
+                    <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+                      <span className="rounded px-1.5 py-0.5 bg-blue-900/50 text-blue-300">{msg.type}</span>
+                      <span>{msg.timestamp.toLocaleTimeString()}</span>
+                    </div>
+                    <p className="text-gray-300">{msg.content}</p>
+                    {msg.targetAsset && (
+                      <span className="mt-1 inline-block rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-400">{msg.targetAsset}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-500">
+                <p>No analysis yet — waiting for scan cycles</p>
+              </div>
+            )}
+          </div>
+        ) : agentTab === 'signals' ? (
+          <div className="p-6">
+            <h3 className="mb-3 font-semibold">Approved Signals</h3>
+            {currentAgent.scanResults.filter(r => r.riskApproved).length > 0 ? (
+              <div className="space-y-3">
+                {currentAgent.scanResults.filter(r => r.riskApproved).map((sig, i) => (
+                  <div key={i} className="rounded bg-gray-800/50 p-4 text-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs">{sig.asset}</span>
+                        <span className={`rounded px-1.5 py-0.5 text-xs ${sig.direction === 'BUY' ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                          {sig.direction}
+                        </span>
+                        <span className="rounded bg-green-700 px-1.5 py-0.5 text-xs text-white">Approved</span>
+                      </div>
+                      <span className="text-xs text-gray-500">{new Date(sig.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-xs text-gray-400">
+                      <div>Entry: <span className="text-white">{sig.entry}</span></div>
+                      <div>SL: <span className="text-red-300">{sig.stopLoss}</span></div>
+                      <div>TP: <span className="text-green-300">{sig.takeProfit1}</span></div>
+                      <div>R:R: <span className="text-yellow-300">{sig.riskRewardRatio}</span></div>
+                    </div>
+                    {sig.confidence && (
+                      <div className="mt-2 text-xs text-gray-500">Confidence: {sig.confidence}%</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-500">
+                <p className="text-2xl mb-2">📊</p>
+                <p>No signals generated yet</p>
+                <p className="text-xs mt-1">Signals appear when setups meet criteria</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-6">
+            <h3 className="mb-3 font-semibold">Scan History (All Responses)</h3>
+            {currentAgent.scanResults.length > 0 ? (
+              <div className="space-y-2">
+                {currentAgent.scanResults.map((r, i) => (
+                  <div key={i} className={`rounded p-3 text-sm ${r.riskApproved ? 'bg-green-900/20 border border-green-800/30' : r.isSignal ? 'bg-yellow-900/20 border border-yellow-800/30' : 'bg-gray-800/30'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs">{r.asset}</span>
+                        <span className={`rounded px-1.5 py-0.5 text-xs ${r.isSignal ? (r.riskApproved ? 'bg-green-700 text-white' : 'bg-yellow-700 text-white') : 'bg-gray-700 text-gray-300'}`}>
+                          {r.isSignal ? (r.riskApproved ? '✅ Signal' : '⚠️ Suppressed') : '❌ NO_SIGNAL'}
+                        </span>
+                        {r.direction && (
+                          <span className={`rounded px-1.5 py-0.5 text-xs ${r.direction === 'BUY' ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                            {r.direction}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span>{r.responseTimeMs}ms</span>
+                        <span>{new Date(r.timestamp).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {r.rationale && (
+                      <p className="text-gray-400 text-xs mt-1">{r.rationale}</p>
+                    )}
+                    {r.isSignal && r.entry && (
+                      <div className="mt-1 flex gap-3 text-xs text-gray-400">
+                        <span>Entry: {r.entry}</span>
+                        <span>SL: {r.stopLoss}</span>
+                        <span>TP: {r.takeProfit1}</span>
+                        <span>R:R: {r.riskRewardRatio}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-500">
+                <p>No scan results yet — trigger a scan first</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Strategy Description */}
+      <div className="mt-6 rounded-lg border border-gray-800 bg-gray-900 p-6">
+        <h3 className="mb-3 font-semibold">📋 Strategy: {currentAgent.strategy}</h3>
+        <p className="text-sm text-gray-400">{strategyDescriptions[currentAgent.id] || 'Trading strategy using technical analysis to identify high-probability setups.'}</p>
       </div>
     </div>
   );
 }
+
+const strategyDescriptions: Record<string, string> = {
+  'AGENT-01': '🐱 NyamPip — ICT specialist using Order Blocks, Fair Value Gaps, Liquidity Sweeps, CHoCH/BOS, and Kill Zone entries. Requires 5+ of 7 ICT checklist items including liquidity sweep, structure break, and OTE confluence with OB/FVG.',
+  'AGENT-02': '📊 DekTrade — Smart Money Concepts tracking BOS, CHoCH, supply/demand zones, and institutional order flow. Validates zones with displacement, tracks accumulation/manipulation/distribution phases, and trades fresh zone retests.',
+  'AGENT-03': '📈 LengFX — Support & Resistance using key horizontal levels (3+ touches), prior day highs/lows, session extremes, psychological round numbers, and role reversal patterns. Requires rejection candle confirmation.',
+  'AGENT-04': '😴 LazyTrader — RSI divergence detection with candlestick confirmation. Only trades when divergence + OB/OS + reversal pattern all align. Lazy but effective — waits for obvious setups.',
+  'AGENT-05': '📉 SaorchSell 😂 — MACD momentum using crossovers, histogram divergence, zero-line proximity, and trend alignment. Loves to short but respects data. Requires 5+ of 7 checklist items.',
+  'AGENT-06': '🚀 LoyLong — Trend following via EMA 20/50/200 alignment with higher timeframe confirmation. Prefers pullback entries over crossovers for better R:R. Always loyal to the trend.',
+  'AGENT-07': '💀 OtLuyShort 💀 — Breakout detection with consolidation range mapping, volume spike validation, re-test entries, and measured move targets. Ot Luy = stop loss — always running stops 💀',
+  'AGENT-08': '💰 HotMargin — Mean reversion using Bollinger Band extremes, VWAP deviation, and reversal candle patterns. Critical: avoids trading during strong trends. Fades overextended price back to mean.',
+  'AGENT-09': '🏃 RotSL — Volatility squeeze detection via TTM Squeeze patterns and ATR compression. Rot = run in Khmer. Anticipates expansion moves after low-volatility periods. The stop loss runner 😆',
+  'AGENT-10': '💎 ChnganhProfit — Multi-confluence requiring 3+ independent confirmations from different categories (structure, levels, momentum, trend, volume, pattern). Chnganh = skillful. Only trades when everything aligns.',
+};
 
 /* ── Elimination Page ─────────────────────────────── */
 
@@ -254,13 +530,39 @@ function EliminationPage() {
 
 /* ── System Page ──────────────────────────────────── */
 
+interface SystemStatus {
+  paused: boolean;
+  pausedAt?: string;
+  activeScan: boolean;
+  lastScanAt?: string;
+}
+
 function SystemPage() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState('all');
   const [dryRun, setDryRun] = useState(true);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({ paused: false, activeScan: false });
+  const [confluenceThreshold, setConfluenceThreshold] = useState(3);
 
   const assets = ['all', 'FX:XAUUSD', 'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY'];
+
+  // Poll system status
+  React.useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('http://localhost:3101/api/status');
+        if (res.ok) {
+          setSystemStatus(await res.json());
+        }
+      } catch {
+        // API not available
+      }
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleTriggerScan = async () => {
     setScanning(true);
@@ -268,7 +570,7 @@ function SystemPage() {
 
     try {
       const asset = selectedAsset === 'all' ? undefined : selectedAsset;
-      const res = await fetch('http://localhost:3100/api/trigger-scan', {
+      const res = await fetch('http://localhost:3101/api/trigger-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ asset, dryRun }),
@@ -291,9 +593,100 @@ function SystemPage() {
     }
   };
 
+  const handleStopSystem = async () => {
+    try {
+      await fetch('http://localhost:3101/api/stop', { method: 'POST' });
+      setSystemStatus(prev => ({ ...prev, paused: true, pausedAt: new Date().toISOString() }));
+    } catch (error: any) {
+      console.error('Failed to stop system:', error);
+    }
+  };
+
+  const handleResumeSystem = async () => {
+    try {
+      await fetch('http://localhost:3101/api/resume', { method: 'POST' });
+      setSystemStatus(prev => ({ ...prev, paused: false, pausedAt: undefined }));
+    } catch (error: any) {
+      console.error('Failed to resume system:', error);
+    }
+  };
+
+  const handleUpdateThreshold = async () => {
+    try {
+      const res = await fetch('http://localhost:3101/api/config/threshold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: confluenceThreshold }),
+      });
+      if (res.ok) {
+        setScanResult(`✅ Threshold updated to ${confluenceThreshold}/5. Next scans will use this value.`);
+      } else {
+        const err = await res.json();
+        setScanResult(`❌ Error: ${err.error}`);
+      }
+    } catch (error: any) {
+      setScanResult(`❌ Failed to update threshold: ${error.message}`);
+    }
+  };
+
   return (
     <div>
       <h2 className="mb-4 text-lg font-semibold">System Health</h2>
+
+      {/* System Controls */}
+      <div className={`mb-6 rounded-lg border p-5 ${systemStatus.paused ? 'border-yellow-800 bg-yellow-950/50' : 'border-green-800 bg-green-950/50'}`}>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className={`font-semibold ${systemStatus.paused ? 'text-yellow-300' : 'text-green-300'}`}>
+              {systemStatus.paused ? '⏸️ System Paused' : '▶️ System Active'}
+            </h3>
+            {systemStatus.pausedAt && (
+              <p className="text-sm text-gray-400">Paused since {new Date(systemStatus.pausedAt).toLocaleTimeString()}</p>
+            )}
+            {systemStatus.activeScan && (
+              <p className="text-sm text-blue-300">🔄 Scan in progress...</p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {systemStatus.paused ? (
+              <button onClick={handleResumeSystem} className="rounded-lg bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-700">
+                ▶️ Resume
+              </button>
+            ) : (
+              <button onClick={handleStopSystem} className="rounded-lg bg-red-600 px-5 py-2 text-sm font-medium text-white hover:bg-red-700">
+                ⏸️ Stop
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Confluence Threshold Control */}
+      <div className="mb-6 rounded-lg border border-purple-800 bg-purple-950/50 p-5">
+        <h3 className="mb-2 font-semibold text-purple-300">🎯 Confluence Threshold: {confluenceThreshold}/5</h3>
+        <p className="mb-3 text-sm text-gray-400">Minimum checklist items required for a signal. Lower = more aggressive, higher = more conservative.</p>
+        <div className="flex items-center gap-3">
+          {[2, 3, 4, 5].map(val => (
+            <button
+              key={val}
+              onClick={() => setConfluenceThreshold(val)}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                confluenceThreshold === val
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              {val} {val === 2 ? '(Very Aggressive)' : val === 3 ? '(Aggressive)' : val === 4 ? '(Balanced)' : '(Conservative)'}
+            </button>
+          ))}
+          <button
+            onClick={handleUpdateThreshold}
+            className="rounded-lg bg-purple-600 px-5 py-2 text-sm font-medium text-white hover:bg-purple-700"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
 
       {/* Manual Scan Trigger */}
       <div className="mb-6 rounded-lg border border-blue-800 bg-blue-950/50 p-5">
@@ -327,9 +720,9 @@ function SystemPage() {
 
           <button
             onClick={handleTriggerScan}
-            disabled={scanning}
+            disabled={scanning || systemStatus.paused}
             className={`rounded-lg px-5 py-2 text-sm font-medium transition-colors ${
-              scanning
+              scanning || systemStatus.paused
                 ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
@@ -420,23 +813,29 @@ function ChatRoomPage() {
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState<string>('all');
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const prevMsgCountRef = React.useRef(5);
 
+  // Only auto-scroll when new messages are added, not on every re-render or filter change
   React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > prevMsgCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    prevMsgCountRef.current = messages.length;
   }, [messages]);
 
   // Poll for new messages every 5 seconds
   React.useEffect(() => {
     const poll = async () => {
       try {
-        const res = await fetch('http://localhost:3100/api/chat?limit=100');
+        const res = await fetch('http://localhost:3101/api/chat?limit=100');
         if (res.ok) {
           const data = await res.json();
           const apiMessages = data.messages.map((m: any) => ({
             ...m,
             timestamp: new Date(m.timestamp),
           }));
-          if (apiMessages.length > 0) {
+          // Only update if we got new messages
+          if (apiMessages.length > messages.length) {
             setMessages(apiMessages);
           }
         }
@@ -445,10 +844,9 @@ function ChatRoomPage() {
       }
     };
 
-    poll();
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [messages.length]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -465,7 +863,7 @@ function ChatRoomPage() {
 
     // Try to send to API
     try {
-      await fetch('http://localhost:3100/api/chat', {
+      await fetch('http://localhost:3101/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -661,14 +1059,14 @@ function EventRow({ time, event, type }: { time: string; event: string; type: st
 }
 
 const agents = [
-  { id: 'AGENT-01', strategy: 'ICT Concepts' },
-  { id: 'AGENT-02', strategy: 'Smart Money Concepts' },
-  { id: 'AGENT-03', strategy: 'Support & Resistance' },
-  { id: 'AGENT-04', strategy: 'RSI + Price Action' },
-  { id: 'AGENT-05', strategy: 'MACD Momentum' },
-  { id: 'AGENT-06', strategy: 'Trend Following' },
-  { id: 'AGENT-07', strategy: 'Breakout Hunter' },
-  { id: 'AGENT-08', strategy: 'Mean Reversion' },
-  { id: 'AGENT-09', strategy: 'Volatility Squeeze' },
-  { id: 'AGENT-10', strategy: 'Multi-Confluence' },
+  { id: 'AGENT-01', strategy: 'NyamPip', promptFile: 'ict_concepts.json' },
+  { id: 'AGENT-02', strategy: 'DekTrade', promptFile: 'smc.json' },
+  { id: 'AGENT-03', strategy: 'LengFX', promptFile: 'support_resistance.json' },
+  { id: 'AGENT-04', strategy: 'LazyTrader', promptFile: 'rsi_price_action.json' },
+  { id: 'AGENT-05', strategy: 'SaorchSell 😂', promptFile: 'macd_momentum.json' },
+  { id: 'AGENT-06', strategy: 'LoyLong', promptFile: 'trend_following.json' },
+  { id: 'AGENT-07', strategy: 'OtLuyShort 💀', promptFile: 'breakout_hunter.json' },
+  { id: 'AGENT-08', strategy: 'HotMargin', promptFile: 'mean_reversion.json' },
+  { id: 'AGENT-09', strategy: 'RotSL 😆', promptFile: 'volatility_squeeze.json' },
+  { id: 'AGENT-10', strategy: 'ChnganhProfit', promptFile: 'multi_confluence.json' },
 ];

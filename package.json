@@ -12,6 +12,8 @@
     "build": "tsc",
     "start": "node dist/cli.js",
     "start:session": "node dist/cli.js start",
+    "start:api": "node dist/api/server.js",
+    "dev:api": "tsx watch src/api/server.ts",
     "dashboard:dev": "cd dashboard && npm run dev",
     "dashboard:build": "cd dashboard && npm run build",
     "db:generate": "drizzle-kit generate",
