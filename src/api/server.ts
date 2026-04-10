@@ -205,7 +205,7 @@ app.post('/api/trigger-scan', async (req, res) => {
         }, Date.now() - cycleStart);
       }
 
-      scanResults.push({ asset: scanAsset, approved, suppressed, signals, agentDetails: verbose ? agentResults.map(r => ({ id: r.agentId, strategy: r.strategy, response: r.response, responseTimeMs: r.responseTimeMs, error: r.error })) : undefined });
+      scanResults.push({ asset: scanAsset, approved, suppressed, signals, agentDetails: verbose ? agentResults.map(r => ({ id: r.agentId, strategy: r.strategy, response: r.response, responseTimeMs: r.responseTimeMs, error: r.error, rawOutput: (r as any).rawOutput || '' })) : undefined });
       logger.info({ msg: `Scan complete for ${scanAsset}`, approved, suppressed });
     }
 

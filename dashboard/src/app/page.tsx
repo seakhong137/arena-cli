@@ -788,60 +788,9 @@ function SystemPage() {
             <p className="text-sm text-gray-400">How each agent analyzed the market and what they decided</p>
           </div>
           <div className="divide-y divide-gray-800">
-            {scanDetails.map((agent: any, i: number) => {
-              const resp = agent.response;
-              const isSignal = typeof resp === 'object';
-              return (
-                <div key={i} className={`p-5 ${isSignal ? 'bg-green-900/10' : 'bg-gray-800/20'}`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-sm font-bold">{agent.id}</span>
-                      <span className="text-sm text-gray-400">{agent.strategy}</span>
-                      {isSignal ? (
-                        <span className="rounded bg-green-700 px-2 py-0.5 text-xs text-white">✅ SIGNAL — {(resp as any).direction}</span>
-                      ) : (
-                        <span className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">❌ NO_SIGNAL</span>
-                      )}
-                    </div>
-                    <span className="text-xs text-gray-500">{agent.responseTimeMs}ms</span>
-                  </div>
-
-                  {isSignal && (
-                    <div className="mb-3 grid grid-cols-4 gap-3 text-xs">
-                      <div className="rounded bg-gray-800 px-3 py-2">
-                        <div className="text-gray-500">Entry</div>
-                        <div className="font-bold">{(resp as any).entry}</div>
-                      </div>
-                      <div className="rounded bg-gray-800 px-3 py-2">
-                        <div className="text-gray-500">Stop Loss</div>
-                        <div className="font-bold text-red-300">{(resp as any).stop_loss}</div>
-                      </div>
-                      <div className="rounded bg-gray-800 px-3 py-2">
-                        <div className="text-gray-500">Take Profit</div>
-                        <div className="font-bold text-green-300">{(resp as any).take_profit_1}</div>
-                      </div>
-                      <div className="rounded bg-gray-800 px-3 py-2">
-                        <div className="text-gray-500">R:R Ratio</div>
-                        <div className="font-bold text-yellow-300">{(resp as any).risk_reward_ratio}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  {isSignal && (resp as any).rationale && (
-                    <div className="rounded bg-gray-800/50 p-3 text-sm">
-                      <div className="mb-1 text-xs text-gray-500">Agent's Reasoning:</div>
-                      <p className="text-gray-300">{(resp as any).rationale}</p>
-                    </div>
-                  )}
-
-                  {agent.error && (
-                    <div className="rounded bg-red-900/20 p-3 text-sm text-red-300">
-                      ⚠️ Error: {agent.error}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {scanDetails.map((agent: any, i: number) => (
+              <AgentCard key={i} agent={agent} />
+            ))}
           </div>
         </div>
       )}
@@ -1148,6 +1097,82 @@ function EventRow({ time, event, type }: { time: string; event: string; type: st
       <span className="text-xs text-gray-500">{time}</span>
       <span className={`text-xs ${colors[type] || 'text-gray-400'}`}>●</span>
       <span className="text-gray-300">{event}</span>
+    </div>
+  );
+}
+
+function AgentCard({ agent }: { agent: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const resp = agent.response;
+  const isSignal = typeof resp === 'object';
+  const rawOutput = agent.rawOutput || '';
+
+  return (
+    <div className={`p-5 ${isSignal ? 'bg-green-900/10' : 'bg-gray-800/20'}`}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-sm font-bold">{agent.id}</span>
+          <span className="text-sm text-gray-400">{agent.strategy}</span>
+          {isSignal ? (
+            <span className="rounded bg-green-700 px-2 py-0.5 text-xs text-white">✅ SIGNAL — {resp.direction}</span>
+          ) : (
+            <span className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300">❌ NO_SIGNAL</span>
+          )}
+        </div>
+        <span className="text-xs text-gray-500">{agent.responseTimeMs}ms</span>
+      </div>
+
+      {isSignal && (
+        <div className="mb-3 grid grid-cols-4 gap-3 text-xs">
+          <div className="rounded bg-gray-800 px-3 py-2">
+            <div className="text-gray-500">Entry</div>
+            <div className="font-bold">{resp.entry}</div>
+          </div>
+          <div className="rounded bg-gray-800 px-3 py-2">
+            <div className="text-gray-500">Stop Loss</div>
+            <div className="font-bold text-red-300">{resp.stop_loss}</div>
+          </div>
+          <div className="rounded bg-gray-800 px-3 py-2">
+            <div className="text-gray-500">Take Profit</div>
+            <div className="font-bold text-green-300">{resp.take_profit_1}</div>
+          </div>
+          <div className="rounded bg-gray-800 px-3 py-2">
+            <div className="text-gray-500">R:R Ratio</div>
+            <div className="font-bold text-yellow-300">{resp.risk_reward_ratio}</div>
+          </div>
+        </div>
+      )}
+
+      {isSignal && resp.rationale && (
+        <div className="mb-3 rounded bg-gray-800/50 p-3 text-sm">
+          <div className="mb-1 text-xs text-gray-500">Agent's Reasoning:</div>
+          <p className="text-gray-300">{resp.rationale}</p>
+        </div>
+      )}
+
+      {/* Raw Output Toggle — Shows full agent thinking */}
+      {rawOutput && (
+        <div>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="mb-2 flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+          >
+            <span>{expanded ? '▼' : '▶'}</span>
+            <span>{expanded ? 'Hide' : 'Show'} Full Agent Analysis ({rawOutput.length} chars)</span>
+          </button>
+          {expanded && (
+            <div className="rounded bg-gray-950 p-3 text-xs font-mono text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto border border-gray-800 leading-relaxed">
+              {rawOutput}
+            </div>
+          )}
+        </div>
+      )}
+
+      {agent.error && (
+        <div className="rounded bg-red-900/20 p-3 text-sm text-red-300">
+          ⚠️ Error: {agent.error}
+        </div>
+      )}
     </div>
   );
 }
