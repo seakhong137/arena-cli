@@ -6,6 +6,7 @@ import React from 'react';
 const PAGES = [
   { id: 'leaderboard', label: 'Leaderboard', icon: '🏆' },
   { id: 'signals', label: 'Signals', icon: '📊' },
+  { id: 'manage-signals', label: 'Manage Signals', icon: '⚙️' },
   { id: 'agents', label: 'Agents', icon: '🤖' },
   { id: 'chat', label: 'Chat Room', icon: '💬' },
   { id: 'elimination', label: 'Elimination', icon: '⚔️' },
@@ -14,6 +15,52 @@ const PAGES = [
 
 export default function DashboardPage() {
   const [activePage, setActivePage] = useState('leaderboard');
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState('all');
+  const [dryRun, setDryRun] = useState(true);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({ paused: false, activeScan: false });
+  const [confluenceThreshold, setConfluenceThreshold] = useState(3);
+  const [agentCount, setAgentCount] = useState(10);
+  const [scanDetails, setScanDetails] = useState<any[]>([]);
+  const [activeAgentSignals, setActiveAgentSignals] = useState<Record<string, any>>({});
+  const [activeSignals, setActiveSignals] = useState(0);
+
+  const assets = ['all', 'FX:XAUUSD', 'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY'];
+
+  React.useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('http://localhost:3101/api/status');
+        if (res.ok) {
+          setSystemStatus(await res.json());
+        }
+      } catch {
+        // API not available
+      }
+    };
+    const fetchActiveSignals = async () => {
+      try {
+        const res = await fetch('http://localhost:3101/api/agents/active-signals');
+        if (res.ok) {
+          const data = await res.json();
+          setActiveAgentSignals(data.agentSignals || {});
+        }
+      } catch {
+        // Ignore
+      }
+    };
+    const stored = localStorage.getItem('confluenceThreshold');
+    if (stored) setConfluenceThreshold(parseInt(stored, 10));
+    fetchStatus();
+    fetchActiveSignals();
+    const statusInterval = setInterval(fetchStatus, 3000);
+    const signalInterval = setInterval(fetchActiveSignals, 15000);
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(signalInterval);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -31,8 +78,14 @@ export default function DashboardPage() {
             <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
               10 Agents
             </span>
+            <span className="rounded-full bg-orange-900/50 px-3 py-1 text-xs text-orange-300">
+              🔒 {activeSignals} Busy
+            </span>
+            <span className="rounded-full bg-green-900/50 px-3 py-1 text-xs text-green-300">
+              ✅ {10 - activeSignals} Available
+            </span>
             <span className="rounded-full bg-blue-900/50 px-3 py-1 text-xs text-blue-300">
-              Threshold: 3
+              Threshold: {confluenceThreshold}
             </span>
             <span className="rounded-full bg-yellow-900/50 px-3 py-1 text-xs text-yellow-300">
               Waiting for NY Session
@@ -62,8 +115,9 @@ export default function DashboardPage() {
 
       {/* Content */}
       <main className="mx-auto max-w-7xl p-6">
-        {activePage === 'leaderboard' && <LeaderboardPage />}
+        {activePage === 'leaderboard' && <LeaderboardPage activeAgentSignals={activeAgentSignals} systemStatus={systemStatus} />}
         {activePage === 'signals' && <SignalsPage />}
+        {activePage === 'manage-signals' && <ManageSignalsPage />}
         {activePage === 'agents' && <AgentsPage />}
         {activePage === 'chat' && <ChatRoomPage />}
         {activePage === 'elimination' && <EliminationPage />}
@@ -75,14 +129,91 @@ export default function DashboardPage() {
 
 /* ── Leaderboard Page ─────────────────────────────── */
 
-function LeaderboardPage() {
+function LeaderboardPage({ activeAgentSignals, systemStatus }: { activeAgentSignals: Record<string, any>, systemStatus: { activeScan?: boolean } }) {
+  const [agents, setAgents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalSignals, setTotalSignals] = useState(0);
+  const [activeSignals, setActiveSignals] = useState(0);
+  const [openAgentIds, setOpenAgentIds] = useState<Record<string, any>>({});
+
+  React.useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        // Fetch agent performance metrics (includes scan stats + win rate, profit factor, etc.)
+        const allAgentData: any[] = [];
+        for (let i = 1; i <= 10; i++) {
+          const id = `AGENT-${String(i).padStart(2, '0')}`;
+          try {
+            const res = await fetch(`http://localhost:3101/api/agent/${id}/performance`);
+            if (res.ok) {
+              const data = await res.json();
+              allAgentData.push({ id, ...data });
+            }
+          } catch {
+            allAgentData.push({ id, totalSignals: 0, activeSignals: 0, resolvedSignals: 0, wins: 0, losses: 0, expired: 0, winRate: 0, profitFactor: 0, maxDrawdown: 0, avgResponseTime: 0, lastScanAt: null, lastSignalAt: null });
+          }
+        }
+
+        // Fetch open signals to determine active status
+        try {
+          const res = await fetch('http://localhost:3101/api/signals');
+          if (res.ok) {
+            const data = await res.json();
+            const openSignals = (data.signals || []).filter((s: any) => s.status === 'OPEN');
+            const activeIds: Record<string, any> = {};
+            for (const sig of openSignals) {
+              const agentId = sig.agent_id || sig.agentId;
+              activeIds[agentId] = sig;
+            }
+            setOpenAgentIds(activeIds);
+            setActiveSignals(Object.keys(activeIds).length);
+          }
+        } catch {
+          // Ignore
+        }
+
+        // Calculate totals
+        const totalScans = allAgentData.reduce((sum, a) => sum + (a.totalScans || 0), 0);
+        const totalSig = allAgentData.reduce((sum, a) => sum + (a.totalSignals || 0), 0);
+        setTotalSignals(totalScans);
+        setActiveSignals(totalSig);
+
+        // Sort by composite score: Win Rate (50%) + Profit Factor normalized (30%) + inverse Max DD (20%)
+        // Agents with no signals go to the bottom
+        allAgentData.sort((a, b) => {
+          const aHasSignals = a.totalSignals > 0;
+          const bHasSignals = b.totalSignals > 0;
+          if (!aHasSignals && !bHasSignals) return 0;
+          if (!aHasSignals) return 1;
+          if (!bHasSignals) return -1;
+
+          const scoreA = (a.winRate || 0) * 0.5 + 
+            Math.min((a.profitFactor || 0) / 3, 1) * 100 * 0.3 + 
+            Math.max(100 - (a.maxDrawdown || 0) * 10, 0) * 0.2;
+          const scoreB = (b.winRate || 0) * 0.5 + 
+            Math.min((b.profitFactor || 0) / 3, 1) * 100 * 0.3 + 
+            Math.max(100 - (b.maxDrawdown || 0) * 10, 0) * 0.2;
+          return scoreB - scoreA;
+        });
+        setAgents(allAgentData);
+      } catch {
+        // API not available
+      }
+      setLoading(false);
+    };
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div>
       {/* Stats Cards */}
       <div className="mb-6 grid grid-cols-4 gap-4">
-        <StatCard label="Active Agents" value="10" sub="All healthy" color="green" />
-        <StatCard label="Signals Today" value="0" sub="NY session not started" color="blue" />
-        <StatCard label="Win Rate (Week)" value="--" sub="No data yet" color="yellow" />
+        <StatCard label="Total Scans" value={totalSignals.toString()} sub="Across all agents" color="green" />
+        <StatCard label="Signals Generated" value={activeSignals.toString()} sub="Total valid signals" color="blue" />
+        <StatCard label="Active Signals" value={Object.keys(activeAgentSignals).length.toString()} sub="Currently OPEN" color="yellow" />
         <StatCard label="Next Elimination" value="Sunday" sub="23:59 EST" color="purple" />
       </div>
 
@@ -90,85 +221,492 @@ function LeaderboardPage() {
       <div className="rounded-lg border border-gray-800 bg-gray-900">
         <div className="border-b border-gray-800 px-6 py-4">
           <h2 className="text-lg font-semibold">Agent Leaderboard</h2>
-          <p className="text-sm text-gray-400">Ranked by composite score (win rate + profit factor + drawdown)</p>
+          <p className="text-sm text-gray-400">Ranked by composite score: Win Rate (50%) + Profit Factor (30%) + Drawdown (20%)</p>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase">
-              <th className="px-6 py-3">Rank</th>
-              <th className="px-6 py-3">Agent</th>
-              <th className="px-6 py-3">Strategy</th>
-              <th className="px-6 py-3 text-center">Signals</th>
-              <th className="px-6 py-3 text-center">Win Rate</th>
-              <th className="px-6 py-3 text-center">Profit Factor</th>
-              <th className="px-6 py-3 text-center">Max DD</th>
-              <th className="px-6 py-3 text-center">Score</th>
-              <th className="px-6 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents.map((agent, i) => (
-              <tr key={agent.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                <td className="px-6 py-4 text-gray-500">#{i + 1}</td>
-                <td className="px-6 py-4 font-mono text-xs">{agent.id}</td>
-                <td className="px-6 py-4 text-gray-300">{agent.strategy}</td>
-                <td className="px-6 py-4 text-center text-gray-400">--</td>
-                <td className="px-6 py-4 text-center text-gray-400">--</td>
-                <td className="px-6 py-4 text-center text-gray-400">--</td>
-                <td className="px-6 py-4 text-center text-gray-400">--</td>
-                <td className="px-6 py-4 text-center text-gray-400">--</td>
-                <td className="px-6 py-4">
-                  <StatusBadge status="ACTIVE" />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="px-6 py-8 text-center text-gray-500">
-          Awaiting first NY session to populate data
-        </div>
+        {loading ? (
+          <div className="py-16 text-center text-gray-500">Loading...</div>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase">
+                  <th className="px-6 py-3">Rank</th>
+                  <th className="px-6 py-3">Agent</th>
+                  <th className="px-6 py-3">Strategy</th>
+                  <th className="px-6 py-3 text-center">Signals</th>
+                  <th className="px-6 py-3 text-center">Wins / Losses</th>
+                  <th className="px-6 py-3 text-center">Win Rate</th>
+                  <th className="px-6 py-3 text-center">Profit Factor</th>
+                  <th className="px-6 py-3 text-center">Max DD</th>
+                  <th className="px-6 py-3 text-center">Score</th>
+                  <th className="px-6 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((agent, i) => {
+                  const isActive = !!activeAgentSignals[agent.id];
+                  const hasSignals = agent.totalSignals > 0;
+                  const score = hasSignals ? Math.round(
+                    (agent.winRate || 0) * 0.5 + 
+                    Math.min((agent.profitFactor || 0) / 3, 1) * 100 * 0.3 + 
+                    Math.max(100 - (agent.maxDrawdown || 0) * 10, 0) * 0.2
+                  ) : 0;
+
+                  return (
+                    <tr key={agent.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                      <td className="px-6 py-4 text-gray-500 font-bold">#{i + 1}</td>
+                      <td className="px-6 py-4 font-mono text-xs">{agent.id}</td>
+                      <td className="px-6 py-4 text-gray-300">{agentList.find(a => a.id === agent.id)?.strategy || agent.id}</td>
+                      <td className="px-6 py-4 text-center font-bold">{agent.totalSignals || 0}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="text-green-400">{agent.wins || 0}</span> / <span className="text-red-400">{agent.losses || 0}</span>
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold">
+                        {hasSignals ? <span className={agent.winRate >= 50 ? 'text-green-400' : agent.winRate >= 40 ? 'text-yellow-400' : 'text-red-400'}>{agent.winRate.toFixed(1)}%</span> : '—'}
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold">
+                        {hasSignals ? (agent.profitFactor === 999 ? '∞' : <span className={agent.profitFactor >= 1.5 ? 'text-green-400' : agent.profitFactor >= 1.0 ? 'text-yellow-400' : 'text-red-400'}>{agent.profitFactor.toFixed(2)}</span>) : '—'}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {hasSignals ? <span className="text-yellow-400">{agent.maxDrawdown.toFixed(1)}%</span> : '—'}
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold">
+                        {hasSignals ? <span className="text-white">{score.toFixed(0)}</span> : '—'}
+                      </td>
+                      <td className="px-6 py-4">
+                        {(() => {
+                          const isActive = !!openAgentIds[agent.id] || !!activeAgentSignals[agent.id];
+                          const hasScanned = agent.totalScans > 0;
+                          const isScanning = systemStatus?.activeScan;
+                          if (isActive) {
+                            return (
+                              <span className="rounded-full bg-orange-900/50 px-2.5 py-0.5 text-xs text-orange-300">
+                                🔒 Active Signal
+                              </span>
+                            );
+                          }
+                          if (isScanning && hasScanned) {
+                            return (
+                              <span className="rounded-full bg-blue-900/50 px-2.5 py-0.5 text-xs text-blue-300">
+                                🔍 Scanning
+                              </span>
+                            );
+                          }
+                          if (hasScanned) {
+                            return (
+                              <span className="rounded-full bg-gray-700 px-2.5 py-0.5 text-xs text-gray-300">
+                                💤 Idle
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="rounded-full bg-gray-800 px-2.5 py-0.5 text-xs text-gray-500">
+                              ⏳ Pending
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {totalSignals === 0 && (
+              <div className="px-6 py-8 text-center text-gray-500">
+                Awaiting first scan to populate data
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
+const agentList = [
+  { id: 'AGENT-01', strategy: 'NyamPip' },
+  { id: 'AGENT-02', strategy: 'DekTrade' },
+  { id: 'AGENT-03', strategy: 'LengFX' },
+  { id: 'AGENT-04', strategy: 'LazyTrader' },
+  { id: 'AGENT-05', strategy: 'SaorchSell 😂' },
+  { id: 'AGENT-06', strategy: 'LoyLong' },
+  { id: 'AGENT-07', strategy: 'OtLuyShort 💀' },
+  { id: 'AGENT-08', strategy: 'HotMargin' },
+  { id: 'AGENT-09', strategy: 'RotSL 😆' },
+  { id: 'AGENT-10', strategy: 'ChnganhProfit' },
+];
+
 /* ── Signals Page ─────────────────────────────────── */
 
 function SignalsPage() {
+  const [signals, setSignals] = useState<any[]>([]);
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  const [assetFilter, setAssetFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+
+  React.useEffect(() => {
+    const fetchSignals = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch('http://localhost:3101/api/signals');
+        if (res.ok) {
+          const data = await res.json();
+          // Only show OPEN (active) signals
+          const openSignals = (data.signals || []).filter((s: any) => s.status === 'OPEN');
+          setSignals(openSignals);
+          setPrices(data.prices || {});
+        }
+      } catch {
+        // API not available
+      }
+      setLoading(false);
+    };
+    fetchSignals();
+    const interval = setInterval(fetchSignals, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const filtered = signals.filter(s => {
+    if (assetFilter !== 'all' && s.asset !== assetFilter) return false;
+    return true;
+  });
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Signal Feed</h2>
-          <p className="text-sm text-gray-400">Real-time log of all signals emitted</p>
+          <h2 className="text-lg font-semibold">Active Signals ({filtered.length})</h2>
+          <p className="text-sm text-gray-400">Currently OPEN signals being monitored</p>
         </div>
         <div className="flex gap-2">
-          <select className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300">
-            <option>All Assets</option>
-            <option>FX:XAUUSD</option>
-            <option>FX:EURUSD</option>
-            <option>FX:GBPUSD</option>
-            <option>FX:USDJPY</option>
-          </select>
-          <select className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300">
-            <option>All Status</option>
-            <option>OPEN</option>
-            <option>TP_HIT</option>
-            <option>SL_HIT</option>
-            <option>EXPIRED</option>
+          <select
+            value={assetFilter}
+            onChange={e => setAssetFilter(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300"
+          >
+            <option value="all">All Assets</option>
+            <option value="FX:XAUUSD">FX:XAUUSD</option>
+            <option value="FX:EURUSD">FX:EURUSD</option>
+            <option value="FX:GBPUSD">FX:GBPUSD</option>
+            <option value="FX:USDJPY">FX:USDJPY</option>
           </select>
         </div>
       </div>
 
       <div className="rounded-lg border border-gray-800 bg-gray-900">
-        <div className="flex h-96 items-center justify-center text-gray-500">
-          <div className="text-center">
-            <p className="text-4xl mb-2">📊</p>
-            <p>No signals yet</p>
-            <p className="text-sm text-gray-600">Signals will appear here during NY session</p>
+        {loading ? (
+          <div className="flex h-96 items-center justify-center text-gray-500">Loading...</div>
+        ) : filtered.length > 0 ? (
+          <div className="divide-y divide-gray-800">
+            {filtered.map((sig: any, i: number) => {
+              // Handle both camelCase and snake_case field names
+              const agentId = sig.agent_id || sig.agentId;
+              const strategy = sig.strategy;
+              const asset = sig.asset;
+              const direction = sig.direction;
+              const status = sig.status;
+              const entry = sig.entry;
+              const sl = sig.stop_loss || sig.stopLoss;
+              const tp1 = sig.take_profit_1 || sig.takeProfit1;
+              const tp2 = sig.take_profit_2 || sig.takeProfit2;
+              const rr = sig.risk_reward_ratio || sig.riskRewardRatio;
+              const confidence = sig.confidence_pct || sig.confidencePct;
+              const posSize = sig.position_size_pct || sig.positionSizePct;
+              const rationale = sig.rationale;
+              const invalidation = sig.invalidation;
+              const timestamp = sig.timestamp ? new Date(sig.timestamp) : new Date();
+              const age = Math.round((Date.now() - timestamp.getTime()) / 60000);
+
+              // Current price and P&L - try multiple key formats
+              const currentPrice = prices[sig.asset] ||
+                prices[sig.asset?.replace('FX:', '')] ||
+                prices[`FX:${sig.asset}`] ||
+                null;
+              let pnlValue: number | null = null;
+              let pnlPercent: number | null = null;
+              if (currentPrice && entry) {
+                if (direction === 'BUY') {
+                  pnlValue = currentPrice - entry;
+                  pnlPercent = ((currentPrice - entry) / entry) * 100;
+                } else {
+                  pnlValue = entry - currentPrice;
+                  pnlPercent = ((entry - currentPrice) / entry) * 100;
+                }
+              }
+              const isProfit = pnlValue !== null && pnlValue > 0;
+              const isLoss = pnlValue !== null && pnlValue < 0;
+
+              return (
+              <div key={i} className="p-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-sm font-bold">{agentId}</span>
+                    <span className="text-sm text-gray-400">{strategy}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs text-white ${direction === 'BUY' ? 'bg-green-700' : 'bg-red-700'}`}>
+                      {direction}
+                    </span>
+                    <span className="rounded bg-blue-900/50 px-2 py-0.5 text-xs text-blue-300">
+                      🔵 ACTIVE
+                    </span>
+                    <span className="text-xs text-gray-500">{age}m ago</span>
+                  </div>
+                  <span className="text-xs text-gray-500">{timestamp.toLocaleString()}</span>
+                </div>
+                <div className="grid grid-cols-7 gap-3 text-xs mb-3">
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">Asset</div>
+                    <div className="font-bold">{asset}</div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">Entry</div>
+                    <div className="font-bold">{entry}</div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">Current Price</div>
+                    <div className={`font-bold ${currentPrice ? (isProfit ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-white') : 'text-gray-600'}`}>
+                      {currentPrice || 'Loading...'}
+                    </div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">P&L</div>
+                    <div className={`font-bold ${isProfit ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-gray-500'}`}>
+                      {pnlValue !== null ? `${pnlValue >= 0 ? '+' : ''}${pnlValue.toFixed(2)} (${pnlPercent?.toFixed(2) || '0.00'}%)` : '—'}
+                    </div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">Stop Loss</div>
+                    <div className="font-bold text-red-300">{sl}</div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">Take Profit</div>
+                    <div className="font-bold text-green-300">{tp1}</div>
+                  </div>
+                  <div className="rounded bg-gray-800 px-3 py-2">
+                    <div className="text-gray-500">R:R</div>
+                    <div className="font-bold text-yellow-300">{rr}</div>
+                  </div>
+                </div>
+                {rationale && (
+                  <div className="mb-2 rounded bg-gray-800/50 p-3 text-sm">
+                    <div className="mb-1 text-xs text-gray-500">Rationale:</div>
+                    <p className="text-gray-300">{rationale}</p>
+                  </div>
+                )}
+                {invalidation && (
+                  <div className="text-xs text-gray-500">
+                    ❌ Invalidation: <span className="text-red-400">{invalidation}</span>
+                  </div>
+                )}
+              </div>
+            );
+            })}
           </div>
+        ) : (
+          <div className="flex h-96 items-center justify-center text-gray-500">
+            <div className="text-center">
+              <p className="text-4xl mb-2">📊</p>
+              <p>No active signals</p>
+              <p className="text-sm text-gray-600">Signals will appear here when agents generate them</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Manage Signals Page ──────────────────────────── */
+
+function ManageSignalsPage() {
+  const [signals, setSignals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [newStatus, setNewStatus] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchSignals = async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch('http://localhost:3101/api/signals');
+      if (res.ok) {
+        const data = await res.json();
+        setSignals(data.signals || []);
+      }
+    } catch {
+      // Ignore
+    }
+    setLoading(false);
+    setRefreshing(false);
+  };
+
+  React.useEffect(() => {
+    fetchSignals();
+    const interval = setInterval(fetchSignals, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleUpdateStatus = async (id: string, status: string) => {
+    try {
+      const res = await fetch(`http://localhost:3101/api/signals/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        fetchSignals();
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleDeleteSignal = async (id: string) => {
+    if (!confirm('Delete this signal?')) return;
+    try {
+      const res = await fetch(`http://localhost:3101/api/signals/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchSignals();
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const filtered = signals.filter(s => {
+    if (statusFilter !== 'all' && s.status !== statusFilter) return false;
+    return true;
+  });
+
+  const statusCounts = {
+    OPEN: signals.filter(s => s.status === 'OPEN').length,
+    TP_HIT: signals.filter(s => s.status === 'TP_HIT').length,
+    SL_HIT: signals.filter(s => s.status === 'SL_HIT').length,
+    EXPIRED: signals.filter(s => s.status === 'EXPIRED').length,
+    CANCELLED: signals.filter(s => s.status === 'CANCELLED').length,
+  };
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Signal Management</h2>
+          <p className="text-sm text-gray-400">Manage and update signal statuses</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="rounded border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-300"
+          >
+            <option value="all">All Status ({signals.length})</option>
+            <option value="OPEN">OPEN ({statusCounts.OPEN})</option>
+            <option value="TP_HIT">TP_HIT ({statusCounts.TP_HIT})</option>
+            <option value="SL_HIT">SL_HIT ({statusCounts.SL_HIT})</option>
+            <option value="EXPIRED">EXPIRED ({statusCounts.EXPIRED})</option>
+            <option value="CANCELLED">CANCELLED ({statusCounts.CANCELLED})</option>
+          </select>
+          <button
+            onClick={fetchSignals}
+            disabled={refreshing}
+            className="rounded-lg bg-gray-700 px-4 py-1.5 text-sm text-white hover:bg-gray-600 disabled:opacity-50"
+          >
+            {refreshing ? 'Refreshing...' : '🔄 Refresh'}
+          </button>
         </div>
       </div>
+
+      {loading ? (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 py-16 text-center text-gray-500">Loading...</div>
+      ) : filtered.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-900">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase">
+                <th className="px-4 py-3">Agent</th>
+                <th className="px-4 py-3">Asset</th>
+                <th className="px-4 py-3">Direction</th>
+                <th className="px-4 py-3">Entry</th>
+                <th className="px-4 py-3">SL</th>
+                <th className="px-4 py-3">TP</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {filtered.map((sig: any) => (
+                <tr key={sig.id} className="hover:bg-gray-800/30">
+                  <td className="px-4 py-3 font-mono text-xs">{sig.agentId}</td>
+                  <td className="px-4 py-3">{sig.asset}</td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded px-1.5 py-0.5 text-xs ${sig.direction === 'BUY' ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300'}`}>
+                      {sig.direction}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs">{sig.entry}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-red-300">{sig.stopLoss}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-green-300">{sig.takeProfit1}</td>
+                  <td className="px-4 py-3">
+                    {editingId === sig.id ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={newStatus}
+                          onChange={e => setNewStatus(e.target.value)}
+                          className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs"
+                          autoFocus
+                        >
+                          <option value="OPEN">OPEN</option>
+                          <option value="TP_HIT">TP_HIT</option>
+                          <option value="SL_HIT">SL_HIT</option>
+                          <option value="EXPIRED">EXPIRED</option>
+                          <option value="CANCELLED">CANCELLED</option>
+                        </select>
+                        <button onClick={() => handleUpdateStatus(sig.id, newStatus)} className="rounded bg-green-700 px-2 py-1 text-xs text-white">✓</button>
+                        <button onClick={() => setEditingId(null)} className="rounded bg-gray-700 px-2 py-1 text-xs text-white">✕</button>
+                      </div>
+                    ) : (
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+                        sig.status === 'OPEN' ? 'bg-blue-900/50 text-blue-300' :
+                        sig.status === 'TP_HIT' ? 'bg-green-900/50 text-green-300' :
+                        sig.status === 'SL_HIT' ? 'bg-red-900/50 text-red-300' :
+                        sig.status === 'EXPIRED' ? 'bg-gray-700 text-gray-300' :
+                        'bg-yellow-900/50 text-yellow-300'
+                      }`}>
+                        {sig.status}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-500">
+                    {sig.timestamp ? new Date(sig.timestamp).toLocaleString() : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => { setEditingId(sig.id); setNewStatus(sig.status); }}
+                        className="rounded bg-gray-700 px-2 py-1 text-xs text-white hover:bg-gray-600"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSignal(sig.id)}
+                        className="rounded bg-red-900/50 px-2 py-1 text-xs text-red-300 hover:bg-red-900/80"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 py-16 text-center text-gray-500">
+          No signals found
+        </div>
+      )}
     </div>
   );
 }
@@ -210,6 +748,20 @@ interface AgentDetail {
     lastScanAt: string | null;
     lastSignalAt: string | null;
   };
+  perfMetrics: {
+    totalSignals: number;
+    activeSignals: number;
+    resolvedSignals: number;
+    wins: number;
+    losses: number;
+    expired: number;
+    winRate: number;
+    profitFactor: number;
+    maxDrawdown: number;
+    avgResponseTime: number;
+    lastScanAt: string | null;
+    lastSignalAt: string | null;
+  };
   scanResults: ScanResult[];
   recentAnalysis: ChatMsg[];
   latestResult: ScanResult | null;
@@ -220,6 +772,26 @@ function AgentsPage() {
   const [agentTab, setAgentTab] = useState<'analysis' | 'signals' | 'history'>('analysis');
   const [agentData, setAgentData] = useState<AgentDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [agentPerf, setAgentPerf] = useState<Record<string, any>>({});
+
+  // Fetch performance data for all agents on the list view
+  React.useEffect(() => {
+    const fetchAllPerformance = async () => {
+      const perf: Record<string, any> = {};
+      for (const agent of agents) {
+        try {
+          const res = await fetch(`http://localhost:3101/api/agent/${agent.id}/performance`);
+          if (res.ok) {
+            perf[agent.id] = await res.json();
+          }
+        } catch {
+          perf[agent.id] = null;
+        }
+      }
+      setAgentPerf(perf);
+    };
+    fetchAllPerformance();
+  }, []);
 
   const fetchAgentData = async (agentId: string) => {
     setLoading(true);
@@ -231,6 +803,10 @@ function AgentsPage() {
       // Fetch stats
       const statsRes = await fetch(`http://localhost:3101/api/agent/${agentId}/stats`);
       const stats = statsRes.ok ? (await statsRes.json()).stats : { totalScans: 0, totalSignals: 0, approvedSignals: 0, suppressedSignals: 0, avgResponseTime: 0, lastScanAt: null, lastSignalAt: null };
+
+      // Fetch performance metrics
+      const perfRes = await fetch(`http://localhost:3101/api/agent/${agentId}/performance`);
+      const perfMetrics = perfRes.ok ? (await perfRes.json()) : { totalSignals: 0, activeSignals: 0, resolvedSignals: 0, wins: 0, losses: 0, expired: 0, winRate: 0, profitFactor: 0, maxDrawdown: 0, avgResponseTime: 0, lastScanAt: null, lastSignalAt: null };
 
       // Fetch scan results
       const resultsRes = await fetch(`http://localhost:3101/api/agent/${agentId}/scan-results?limit=20`);
@@ -256,6 +832,7 @@ function AgentsPage() {
         status: 'ACTIVE',
         version: 1,
         performance: stats,
+        perfMetrics,
         scanResults: results,
         recentAnalysis: agentMessages,
         latestResult,
@@ -286,6 +863,24 @@ function AgentsPage() {
                 </div>
                 <StatusBadge status="ACTIVE" />
               </div>
+              <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="rounded bg-gray-800 px-2 py-1.5 text-center">
+                  <div className="text-gray-500">Signals</div>
+                  <div className="font-bold">{agentPerf[agent.id]?.totalSignals ?? '—'}</div>
+                </div>
+                <div className="rounded bg-gray-800 px-2 py-1.5 text-center">
+                  <div className="text-gray-500">Win Rate</div>
+                  <div className="font-bold">{agentPerf[agent.id]?.winRate !== undefined ? `${agentPerf[agent.id].winRate}%` : '—'}</div>
+                </div>
+                <div className="rounded bg-gray-800 px-2 py-1.5 text-center">
+                  <div className="text-gray-500">Profit F.</div>
+                  <div className="font-bold">{agentPerf[agent.id]?.profitFactor !== undefined ? (agentPerf[agent.id].profitFactor === 999 ? '∞' : agentPerf[agent.id].profitFactor.toFixed(2)) : '—'}</div>
+                </div>
+                <div className="rounded bg-gray-800 px-2 py-1.5 text-center">
+                  <div className="text-gray-500">Max DD</div>
+                  <div className="font-bold">{agentPerf[agent.id]?.maxDrawdown !== undefined ? `${agentPerf[agent.id].maxDrawdown}%` : '—'}</div>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -308,22 +903,30 @@ function AgentsPage() {
           </div>
           <p className="text-sm text-gray-400 mt-1">{currentAgent.strategy} • {currentAgent.model}</p>
         </div>
-        <div className="grid grid-cols-4 gap-4 text-sm">
+        <div className="grid grid-cols-6 gap-4 text-sm">
           <div className="text-right">
-            <div className="text-gray-500 text-xs">Total Scans</div>
-            <div className="font-bold">{currentAgent.performance.totalScans}</div>
+            <div className="text-gray-500 text-xs">Total Signals</div>
+            <div className="font-bold text-blue-400">{currentAgent.perfMetrics.totalSignals}</div>
           </div>
           <div className="text-right">
-            <div className="text-gray-500 text-xs">Signals</div>
-            <div className="font-bold text-green-400">{currentAgent.performance.totalSignals}</div>
+            <div className="text-gray-500 text-xs">Wins / Losses</div>
+            <div className="font-bold"><span className="text-green-400">{currentAgent.perfMetrics.wins}</span> / <span className="text-red-400">{currentAgent.perfMetrics.losses}</span></div>
           </div>
           <div className="text-right">
-            <div className="text-gray-500 text-xs">Approved</div>
-            <div className="font-bold text-blue-400">{currentAgent.performance.approvedSignals}</div>
+            <div className="text-gray-500 text-xs">Win Rate</div>
+            <div className="font-bold">{currentAgent.perfMetrics.winRate.toFixed(1)}%</div>
           </div>
           <div className="text-right">
-            <div className="text-gray-500 text-xs">Avg Time</div>
-            <div className="font-bold">{currentAgent.performance.avgResponseTime}ms</div>
+            <div className="text-gray-500 text-xs">Profit Factor</div>
+            <div className="font-bold">{currentAgent.perfMetrics.profitFactor === 999 ? '∞' : currentAgent.perfMetrics.profitFactor.toFixed(2)}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Max Drawdown</div>
+            <div className="font-bold text-yellow-400">{currentAgent.perfMetrics.maxDrawdown.toFixed(2)}%</div>
+          </div>
+          <div className="text-right">
+            <div className="text-gray-500 text-xs">Avg Response</div>
+            <div className="font-bold">{currentAgent.perfMetrics.avgResponseTime}ms</div>
           </div>
         </div>
       </div>
@@ -533,8 +1136,9 @@ function EliminationPage() {
 interface SystemStatus {
   paused: boolean;
   pausedAt?: string;
-  activeScan: boolean;
+  activeScan?: boolean;
   lastScanAt?: string;
+  confluenceThreshold?: number;
 }
 
 function SystemPage() {
@@ -549,7 +1153,7 @@ function SystemPage() {
 
   const assets = ['all', 'FX:XAUUSD', 'FX:EURUSD', 'FX:GBPUSD', 'FX:USDJPY'];
 
-  // Poll system status
+  // Poll system status and fetch config
   React.useEffect(() => {
     const fetchStatus = async () => {
       try {
@@ -561,7 +1165,18 @@ function SystemPage() {
         // API not available
       }
     };
+    const fetchConfig = async () => {
+      try {
+        // Read the config from settings.json via the API health endpoint 
+        // (threshold is applied per-scan, we just need the local state to match)
+        const stored = localStorage.getItem('confluenceThreshold');
+        if (stored) setConfluenceThreshold(parseInt(stored, 10));
+      } catch {
+        // Ignore
+      }
+    };
     fetchStatus();
+    fetchConfig();
     const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -626,6 +1241,7 @@ function SystemPage() {
         body: JSON.stringify({ threshold: confluenceThreshold }),
       });
       if (res.ok) {
+        localStorage.setItem('confluenceThreshold', confluenceThreshold.toString());
         setScanResult(`✅ Threshold updated to ${confluenceThreshold}/5. Next scans will use this value.`);
       } else {
         const err = await res.json();
@@ -673,7 +1289,7 @@ function SystemPage() {
         <h3 className="mb-2 font-semibold text-purple-300">🎯 Confluence Threshold: {confluenceThreshold}/5</h3>
         <p className="mb-3 text-sm text-gray-400">Minimum checklist items required for a signal. Lower = more aggressive, higher = more conservative.</p>
         <div className="flex items-center gap-3">
-          {[2, 3, 4, 5].map(val => (
+          {[1, 2, 3, 4, 5].map(val => (
             <button
               key={val}
               onClick={() => setConfluenceThreshold(val)}
@@ -683,7 +1299,7 @@ function SystemPage() {
                   : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'
               }`}
             >
-              {val} {val === 2 ? '(Very Aggressive)' : val === 3 ? '(Aggressive)' : val === 4 ? '(Balanced)' : '(Conservative)'}
+              {val} {val === 1 ? '(Ultra Aggressive)' : val === 2 ? '(Very Aggressive)' : val === 3 ? '(Aggressive)' : val === 4 ? '(Balanced)' : '(Conservative)'}
             </button>
           ))}
           <button

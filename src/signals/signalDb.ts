@@ -54,11 +54,12 @@ export async function updateSignalStatus(
     .where(eq(signals.id, signalId));
 }
 
-export async function getOpenSignals(): Promise<Signal[]> {
+export async function getOpenSignals(): Promise<(Signal & { id: string })[]> {
   const db = getDb();
   const rows = await db.select().from(signals).where(eq(signals.status, 'OPEN'));
 
   return rows.map((r) => ({
+    id: r.id,
     agent_id: r.agentId,
     strategy: r.strategy,
     timestamp: r.timestamp.toISOString(),

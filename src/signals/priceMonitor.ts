@@ -83,7 +83,7 @@ async function checkOpenSignals(): Promise<void> {
 /**
  * Check if a single signal has hit TP or SL
  */
-async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise<void> {
+async function checkSignalOutcome(signal: Signal & { id: string }, currentPrice: number): Promise<void> {
   const logger = getLogger();
 
   if (signal.direction === 'BUY') {
@@ -103,7 +103,7 @@ async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise
       const pnlPercent = ((signal.take_profit_1 - signal.entry) / signal.entry) * 100;
 
       await updateSignalStatus(
-        signal.agent_id + '-' + signal.timestamp,
+        signal.id,
         'TP_HIT',
         signal.take_profit_1,
         pnlPips,
@@ -128,7 +128,7 @@ async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise
       const pnlPercent = ((signal.stop_loss - signal.entry) / signal.entry) * 100;
 
       await updateSignalStatus(
-        signal.agent_id + '-' + signal.timestamp,
+        signal.id,
         'SL_HIT',
         signal.stop_loss,
         pnlPips,
@@ -154,7 +154,7 @@ async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise
       const pnlPercent = ((signal.entry - signal.take_profit_1) / signal.entry) * 100;
 
       await updateSignalStatus(
-        signal.agent_id + '-' + signal.timestamp,
+        signal.id,
         'TP_HIT',
         signal.take_profit_1,
         pnlPips,
@@ -179,7 +179,7 @@ async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise
       const pnlPercent = ((signal.entry - signal.stop_loss) / signal.entry) * 100;
 
       await updateSignalStatus(
-        signal.agent_id + '-' + signal.timestamp,
+        signal.id,
         'SL_HIT',
         signal.stop_loss,
         pnlPips,
@@ -201,7 +201,7 @@ async function checkSignalOutcome(signal: Signal, currentPrice: number): Promise
     });
 
     await updateSignalStatus(
-      signal.agent_id + '-' + signal.timestamp,
+      signal.id,
       'EXPIRED'
     );
 

@@ -148,11 +148,22 @@ export async function getIndicatorValues(): Promise<Record<string, any>> {
  * Get real-time quote for a symbol
  */
 export async function getQuote(symbol?: string): Promise<any> {
+  if (!symbol) return null;
   const client = await connectMcp();
+
+  // Set the symbol first to get quote for the correct asset
+  try {
+    await client.callTool({
+      name: 'chart_set_symbol',
+      arguments: { symbol },
+    });
+  } catch {
+    // Symbol switch failed, try to get quote anyway
+  }
 
   const result = await client.callTool({
     name: 'quote_get',
-    arguments: { symbol: symbol || '' },
+    arguments: { symbol },
   });
 
   const text = (result as any).content?.[0]?.text;

@@ -96,7 +96,7 @@
     "maxCorrelatedUsdSignals": 3,
     "duplicateGuardMinutes": 15
   },
-  "confluenceThreshold": 2,
+  "confluenceThreshold": 1,
   "elimination": {
     "schedule": "0 23 * * 0",
     "minWeeklySignals": 5,

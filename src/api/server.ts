@@ -11,8 +11,12 @@ import { runPreSignalDebate } from '../signals/chatEngine.js';
 import { randomUUID } from 'crypto';
 import { getState, pauseSystem, resumeSystem, setActiveScan } from '../shared/systemState.js';
 import { saveScanResult, getAgentResults, getLatestResult, getAgentStats } from '../signals/scanResultsDb.js';
+import { getQuote } from '../mcp/client.js';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getDb } from '../signals/db.js';
+import { signals } from '../signals/schema.js';
+import { desc, eq, and } from 'drizzle-orm';
 
 const app = express();
 app.use(cors());
@@ -69,6 +73,122 @@ app.post('/api/config/threshold', (req, res) => {
   }
 });
 
+// Cached prices to avoid slow MCP calls on every request
+let cachedPrices: Record<string, number | null> = {};
+let lastPriceFetch = 0;
+const PRICE_CACHE_TTL = 30000; // 30 seconds
+
+// Update signal status manually
+app.put('/api/signals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, exitPrice, pnlPips, pnlPercent } = req.body;
+    const validStatuses = ['OPEN', 'TP_HIT', 'SL_HIT', 'EXPIRED', 'CANCELLED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const db = getDb();
+    await db.update(signals)
+      .set({
+        status,
+        exitPrice: exitPrice || null,
+        pnlPips: pnlPips || null,
+        pnlPercent: pnlPercent || null,
+        resolvedAt: status !== 'OPEN' ? new Date() : null,
+      })
+      .where(eq(signals.id, id));
+
+    logger.info({ msg: 'Signal status updated', id, status });
+    res.json({ success: true, id, status });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a signal
+app.delete('/api/signals/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = getDb();
+    await db.delete(signals).where(eq(signals.id, id));
+    logger.info({ msg: 'Signal deleted', id });
+    res.json({ success: true, id });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all signals
+app.get('/api/signals', async (_req, res) => {
+  try {
+    const db = getDb();
+    const rows = await db.select().from(signals).orderBy(desc(signals.timestamp)).limit(100);
+
+    // Only fetch prices if cache is stale (avoid slow MCP calls every request)
+    const now = Date.now();
+    if (now - lastPriceFetch > PRICE_CACHE_TTL) {
+      const uniqueAssets = [...new Set(rows.map(r => r.asset))];
+      const prices: Record<string, number | null> = {};
+      for (const asset of uniqueAssets) {
+        try {
+          const quote = await getQuote(asset);
+          if (quote?.last) {
+            prices[asset] = quote.last;
+            if (asset.startsWith('FX:')) {
+              prices[asset.replace('FX:', '')] = quote.last;
+            }
+          } else {
+            prices[asset] = null;
+          }
+        } catch (err) {
+          logger.warn({ msg: `Failed to get quote for ${asset}`, error: (err as Error).message });
+          prices[asset] = null;
+        }
+      }
+      cachedPrices = prices;
+      lastPriceFetch = now;
+    }
+
+    res.json({ signals: rows, prices: cachedPrices });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get current price for a symbol
+app.get('/api/price/:symbol', async (req, res) => {
+  try {
+    const quote = await getQuote(req.params.symbol);
+    res.json({ price: quote?.last || null, quote });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get agents with active signals
+app.get('/api/agents/active-signals', async (_req, res) => {
+  try {
+    const db = getDb();
+    const openSignals = await db.select().from(signals).where(eq(signals.status, 'OPEN'));
+    const agentSignals: Record<string, any> = {};
+    for (const sig of openSignals) {
+      agentSignals[sig.agentId] = {
+        asset: sig.asset,
+        direction: sig.direction,
+        entry: sig.entry,
+        stopLoss: sig.stopLoss,
+        takeProfit1: sig.takeProfit1,
+        status: sig.status,
+        timestamp: sig.timestamp,
+      };
+    }
+    res.json({ agentSignals, totalOpen: openSignals.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Agent scan results
 app.get('/api/agent/:id/scan-results', async (req, res) => {
   try {
@@ -94,6 +214,66 @@ app.get('/api/agent/:id/stats', async (req, res) => {
   try {
     const stats = await getAgentStats(req.params.id);
     res.json({ stats });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get agent performance metrics (win rate, profit factor, max DD)
+app.get('/api/agent/:id/performance', async (req, res) => {
+  try {
+    const db = getDb();
+    const agentId = req.params.id;
+
+    // Get all resolved signals for this agent
+    const allSignals = await db.select()
+      .from(signals)
+      .where(eq(signals.agentId, agentId))
+      .orderBy(desc(signals.timestamp));
+
+    const resolvedSignals = allSignals.filter(s => ['TP_HIT', 'SL_HIT', 'EXPIRED', 'CANCELLED'].includes(s.status));
+
+    const wins = resolvedSignals.filter(s => s.status === 'TP_HIT').length;
+    const losses = resolvedSignals.filter(s => s.status === 'SL_HIT').length;
+    const total = wins + losses;
+    const winRate = total > 0 ? (wins / total) * 100 : 0;
+
+    // Calculate profit factor (gross profit / gross loss)
+    const pnlValues = resolvedSignals.map(s => s.pnlPercent || 0);
+    const grossProfit = pnlValues.filter(p => p > 0).reduce((a, b) => a + b, 0);
+    const grossLoss = Math.abs(pnlValues.filter(p => p < 0).reduce((a, b) => a + b, 0));
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 999 : 0);
+
+    // Max drawdown (simplified - sequential loss streak)
+    let maxDD = 0;
+    let currentDD = 0;
+    for (const pnl of pnlValues) {
+      if (pnl < 0) {
+        currentDD += Math.abs(pnl);
+        maxDD = Math.max(maxDD, currentDD);
+      } else {
+        currentDD = 0;
+      }
+    }
+
+    // Get scan stats
+    const scanStats = await getAgentStats(agentId);
+
+    res.json({
+      agentId,
+      totalSignals: scanStats.totalSignals,
+      activeSignals: scanStats.approvedSignals,
+      resolvedSignals: total,
+      wins,
+      losses,
+      expired: resolvedSignals.filter(s => s.status === 'EXPIRED').length,
+      winRate: Math.round(winRate * 100) / 100,
+      profitFactor: Math.round(profitFactor * 100) / 100,
+      maxDrawdown: Math.round(maxDD * 100) / 100,
+      avgResponseTime: scanStats.avgResponseTime,
+      lastScanAt: scanStats.lastScanAt,
+      lastSignalAt: scanStats.lastSignalAt,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -163,8 +343,35 @@ app.post('/api/trigger-scan', async (req, res) => {
         const isSignal = result.response !== 'NO_SIGNAL' && typeof result.response !== 'string';
         let riskApproved = false;
 
+        // Check if agent already has an active (OPEN) signal — prevent duplicate signals
+        if (isSignal) {
+          try {
+            const openSignals = await getOpenSignals();
+            const existingSignal = openSignals.find(s => s.agent_id === result.agentId);
+            if (existingSignal) {
+              logger.info({
+                msg: `Agent ${result.agentId} already has active signal — skipping`,
+                agentId: result.agentId,
+                existingAsset: existingSignal.asset,
+                existingDirection: existingSignal.direction,
+                existingEntry: existingSignal.entry,
+              });
+              suppressed++;
+              continue; // Skip this agent — don't create new signal
+            }
+          } catch (err) {
+            logger.warn({ msg: `Failed to check open signals for ${result.agentId}`, error: (err as Error).message });
+          }
+        }
+
         if (isSignal) {
           const signal = result.response as any;
+          // Fix agent_id from "UNKNOWN" to actual agent ID for FK constraint
+          if (signal.agent_id === 'UNKNOWN' || !signal.agent_id) {
+            signal.agent_id = result.agentId;
+            signal.strategy = result.strategy;
+            signal.asset = scanAsset;
+          }
           const riskResult = await applyRiskFilters(signal);
           if (riskResult.approved) {
             if (!dryRun) { await saveSignal(signal); signals.push(signal); }
