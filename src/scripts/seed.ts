@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Seed Script — Populates the database with initial 10 agents
+ * Seed Script — Populates the database with initial 5 agents
  */
 
 import { runMigrations, getDb } from '../signals/db.js';
@@ -14,11 +14,6 @@ const INITIAL_AGENTS = [
   { id: 'AGENT-03', strategy: 'LengFX', promptFile: 'support_resistance.json' },
   { id: 'AGENT-04', strategy: 'LazyTrader', promptFile: 'rsi_price_action.json' },
   { id: 'AGENT-05', strategy: 'SaorchSell 😂', promptFile: 'macd_momentum.json' },
-  { id: 'AGENT-06', strategy: 'LoyLong', promptFile: 'trend_following.json' },
-  { id: 'AGENT-07', strategy: 'OtLuyShort 💀', promptFile: 'breakout_hunter.json' },
-  { id: 'AGENT-08', strategy: 'HotMargin', promptFile: 'mean_reversion.json' },
-  { id: 'AGENT-09', strategy: 'RotSL 😆', promptFile: 'volatility_squeeze.json' },
-  { id: 'AGENT-10', strategy: 'ChnganhProfit', promptFile: 'multi_confluence.json' },
 ];
 
 async function seed() {
@@ -48,7 +43,7 @@ async function seed() {
   await db.insert(agents).values(
     INITIAL_AGENTS.map((agent) => ({
       ...agent,
-      model: process.env.AI_CLI_MODEL || 'qwen-vl-plus',
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
       status: 'ACTIVE' as const,
       version: 1,
     }))

@@ -1,6 +1,6 @@
 # 🏛️ The Arena — AI Multi-Agent Trading Signal System
 
-> A self-competing pool of 10 AI trading agents, each using a distinct strategy, that analyze XAUUSD and Forex markets via TradingView MCP, emit structured trade signals during the New York session, and are subject to weekly elimination if they underperform — with the weakest agent auto-mutated and replaced.
+> A self-competing pool of 5 AI trading agents, each using a distinct strategy, that analyze XAUUSD and Forex markets via TradingView MCP, emit structured trade signals during the New York session, and are subject to weekly elimination if they underperform — with the weakest agent auto-mutated and replaced.
 
 **⚠️ Disclaimer:** This system is for educational and signal-generation purposes only. All signals are not financial advice. Trading involves significant risk.
 
@@ -36,7 +36,7 @@ cd dashboard && npm install && npm run dev
 |-------|--------|---------|
 | Phase 0: Project Setup | ✅ Complete | TypeScript monorepo, config, env |
 | Phase 1: Data Layer | ✅ Complete | SQLite, Drizzle ORM, MCP client, payload builder |
-| Phase 2: Agent System | ✅ Complete | 10 agents, qwen CLI runner, risk manager, scheduler |
+| Phase 2: Agent System | ✅ Complete | 5 agents, Gemini API runner, risk manager, scheduler |
 | Phase 3: Signal Pipeline | ✅ Complete | Orchestrator, price monitor, Telegram bot |
 | Phase 4: Elimination | ✅ Complete | Weekly scoring, mutation engine |
 | Phase 5: Dashboard | ✅ Complete | Next.js web app (5 pages), REST API |
@@ -49,7 +49,7 @@ cd dashboard && npm install && npm run dev
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
 │  Scheduler  │────▶│  TradingView MCP │────▶│  Agent Pool  │
-│  (node-cron)│     │  (chart + data)  │     │  (10 agents) │
+│  (node-cron)│     │  (chart + data)  │     │  (5 agents)  │
 └─────────────┘     └──────────────────┘     └──────┬───────┘
                                                      │
                                     ┌────────────────┼────────────────┐
@@ -71,7 +71,7 @@ cd dashboard && npm install && npm run dev
                                        └──────────────┘
 ```
 
-## Agents (10 Strategies)
+## Agents (5 Strategies)
 
 | Agent | Strategy | Core Logic |
 |-------|----------|------------|
@@ -80,11 +80,6 @@ cd dashboard && npm install && npm run dev
 | AGENT-03 | Support & Resistance | Key S/R levels, round numbers |
 | AGENT-04 | RSI + Price Action | RSI divergence, OB/OS + candlesticks |
 | AGENT-05 | MACD Momentum | MACD crossover, histogram divergence |
-| AGENT-06 | Trend Following | EMA 20/50/200 crossover |
-| AGENT-07 | Breakout Hunter | Consolidation breakouts, volume spikes |
-| AGENT-08 | Mean Reversion | Bollinger Bands, VWAP deviation |
-| AGENT-09 | Volatility Squeeze | TTM Squeeze, ATR breakout |
-| AGENT-10 | Multi-Confluence | 3+ confluences required |
 
 ---
 
@@ -92,7 +87,7 @@ cd dashboard && npm install && npm run dev
 
 | Layer | Technology |
 |-------|-----------|
-| Agent Inference | Qwen CLI (`qwen -p` with `qwen-vl-plus`) |
+| Agent Inference | Gemini API (`qwen -p` with `gemini-2.0-flash`) |
 | Orchestrator | Node.js + TypeScript |
 | TradingView | tradingview-mcp (local MCP server) |
 | Database | SQLite (better-sqlite3 + Drizzle ORM) |
@@ -137,7 +132,7 @@ arena dashboard              # Start web dashboard
 # NPM scripts
 npm run dev -- start         # Start with hot reload
 npm run db:migrate           # Run database migrations
-npm run db:seed              # Seed initial 10 agents
+npm run db:seed              # Seed initial 5 agents
 npm test                     # Run 22 tests
 npm run typecheck            # TypeScript validation
 npm run build                # Compile to dist/

@@ -1,41 +1,63 @@
+```
 # Dependencies
 node_modules/
-dashboard/node_modules/
 
-# Build output
-dist/
-dashboard/.next/
-dashboard/out/
-
-# Environment
+# Environment variables
 .env
 .env.local
-.env.*.local
+.env.*
 
-# Database
-data/*.db
-data/*.db-journal
+# Build outputs
+dist/
+build/
+.next/
+out/
 
 # Logs
-data/*.log
-logs/
 *.log
 
-# OS
-.DS_Store
-Thumbs.db
+# Temporary files
+*.tmp
+*.swp
 
-# IDE
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Testing
-coverage/
+# OS files
+.DS_Store
+Thumbs.db
 
-# Temp
-temp/
-tmp/
-*.pid
-data/
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python cache (if any Python files exist in project)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Package manager
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Runtime data
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local development variables
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Next.js
+.next/
+out/
+```

@@ -22,7 +22,7 @@ arena-cli/
 │   │   └── payloadBuilder.ts       # Packages chart data for agent input
 │   ├── agents/
 │   │   ├── agentPool.ts            # Manages all 10 agents, loads prompts
-│   │   ├── agentRunner.ts          # Spawns qwen CLI child process per agent
+│   │   ├── agentRunner.ts          # Spawns Gemini API child process per agent
 │   │   └── prompts/                # 10 strategy prompt JSON files
 │   │       ├── ict_concepts.json
 │   │       ├── smc.json
@@ -45,7 +45,7 @@ arena-cli/
 │   │   └── bot.ts                  # Telegraf bot (alerts, commands)
 │   ├── elimination/
 │   │   ├── weeklyEngine.ts         # Weekly scoring + elimination logic
-│   │   └── mutationEngine.ts       # Qwen CLI prompt mutation for new agents
+│   │   └── mutationEngine.ts       # Gemini API prompt mutation for new agents
 │   ├── dashboard/
 │   │   └── server.ts               # Express API server for dashboard
 │   └── scripts/
@@ -89,7 +89,7 @@ arena-cli/
 4. Sequential agent loop (10 agents, one-by-one):
    a. Load strategy prompt from prompts/*.json
    b. Build agent payload (system prompt + user prompt + image)
-   c. Spawn qwen CLI: qwen -p "{prompt}" --model qwen-vl-plus --approval-mode yolo
+   c. Spawn Gemini API: qwen -p "{prompt}" --model gemini-2.0-flash --approval-mode yolo
    d. Wait for response (30s timeout)
    e. Parse response: extract Signal JSON or detect NO_SIGNAL
    f. Validate against Zod SignalSchema
@@ -129,7 +129,7 @@ arena-cli/
    b. Compute: win rate, profit factor, max drawdown
    c. Score and rank all agents (composite = 0.35*WR + 0.35*PF + 0.30*DD)
    d. If any agent breaches thresholds → flag worst performer
-   e. Mutation Engine generates new prompt via qwen CLI
+   e. Mutation Engine generates new prompt via Gemini API
    f. New agent replaces eliminated slot (AGENT-XX-v2)
    g. Log elimination event
    h. Send Telegram notification
@@ -140,7 +140,7 @@ arena-cli/
 Each agent is invoked via:
 ```bash
 qwen -p "{user_payload}" \
-  --model qwen-vl-plus \
+  --model gemini-2.0-flash \
   --approval-mode yolo
 ```
 
@@ -217,7 +217,7 @@ npm run typecheck
 1. **Integration Testing**: Mock MCP server, test full pipeline
 2. **Dashboard Enhancement**: Add agent detail view, elimination history, system health
 3. **Paper Trading**: Run system for 2 weeks during NY sessions
-4. **Performance Tuning**: Optimize qwen CLI call latency, consider parallel agent execution
+4. **Performance Tuning**: Optimize Gemini API call latency, consider parallel agent execution
 5. **News Filter**: Add economic calendar integration (FOMC, NFP, CPI suppression)
 
 ## Chat Room System

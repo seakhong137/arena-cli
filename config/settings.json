@@ -54,36 +54,6 @@
         "strategy": "SaorchSell 😂",
         "promptFile": "macd_momentum.json",
         "model": "qwen3.6-plus"
-      },
-      {
-        "id": "AGENT-06",
-        "strategy": "LoyLong",
-        "promptFile": "trend_following.json",
-        "model": "qwen3.6-plus"
-      },
-      {
-        "id": "AGENT-07",
-        "strategy": "OtLuyShort 💀",
-        "promptFile": "breakout_hunter.json",
-        "model": "qwen3.6-plus"
-      },
-      {
-        "id": "AGENT-08",
-        "strategy": "HotMargin",
-        "promptFile": "mean_reversion.json",
-        "model": "qwen3.6-plus"
-      },
-      {
-        "id": "AGENT-09",
-        "strategy": "RotSL (stop loss runner 😆)",
-        "promptFile": "volatility_squeeze.json",
-        "model": "qwen3.6-plus"
-      },
-      {
-        "id": "AGENT-10",
-        "strategy": "ChnganhProfit",
-        "promptFile": "multi_confluence.json",
-        "model": "qwen3.6-plus"
       }
     ]
   },
