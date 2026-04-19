@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { loadConfig } from '../shared/config.js';
 import { getLogger } from '../shared/logger.js';
 import { saveChatMessage, getContextMessages, getCycleMessages, getChatMessages, type ChatMessage } from '../signals/chatDb.js';
@@ -102,7 +102,7 @@ export async function postFarewellMessage(
 }
 
 /**
- * Generate a chat response from an agent via qwen CLI
+ * Generate a chat response from an agent via Gemini API
  * Agent reads recent messages and responds with analysis/debate
  */
 export async function generateChatResponse(
@@ -114,8 +114,13 @@ export async function generateChatResponse(
 ): Promise<string> {
   const config = loadConfig();
   const logger = getLogger();
-  const cliPath = process.env.AI_CLI_PATH || 'qwen';
-  const cliModel = model || process.env.AI_CLI_MODEL || 'qwen-vl-plus';
+  
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not set');
+  }
+  
+  const geminiModel = model || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
   const timeout = 60000;
 
   const contextText = context.length > 0
@@ -133,36 +138,32 @@ Respond with your analysis. Keep it concise (2-4 sentences). Show your personali
 
   logger.info({ msg: `Generating chat response for ${agentName}`, agentId });
 
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Chat response timed out after ${timeout / 1000}s`));
-    }, timeout);
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const gemini = genAI.getGenerativeModel({ model: geminiModel });
 
-    const args = ['-p', fullPrompt, '--model', cliModel, '--approval-mode', 'yolo'];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const child = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout?.on('data', (data) => { stdout += data.toString(); });
-    child.stderr?.on('data', (data) => { stderr += data.toString(); });
-
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      if (code === 0 && stdout) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`Qwen CLI exited with code ${code}: ${stderr}`));
-      }
+    const result = await gemini.generateContent({
+      contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 512,
+      },
     });
 
-    child.on('error', (err) => {
-      clearTimeout(timeoutId);
-      reject(err);
-    });
-  });
+    clearTimeout(timeoutId);
+    const response = await result.response;
+    return response.text().trim();
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Chat response timed out after ${timeout / 1000}s`);
+    }
+    throw error;
+  }
 }
 
 /**

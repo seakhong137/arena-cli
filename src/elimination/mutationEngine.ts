@@ -3,7 +3,7 @@
  * Generates improved strategy prompts for eliminated agents
  */
 
-import { spawn } from 'child_process';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { join } from 'path';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -38,8 +38,8 @@ export async function mutateAgent(
   // Build mutation prompt
   const mutationPrompt = buildMutationPrompt(strategy, originalPrompt, performance);
 
-  // Generate new prompt via qwen CLI
-  const newPrompt = await generatePromptViaQwen(mutationPrompt, config.elimination.mutationModel);
+  // Generate new prompt via Gemini API
+  const newPrompt = await generatePromptViaGemini(mutationPrompt, config.elimination.mutationModel);
 
   // Generate new agent ID
   const version = getNextVersion(eliminatedAgentId);
@@ -93,59 +93,47 @@ Return ONLY the new system prompt text. Do not include any explanation or markdo
 }
 
 /**
- * Generate improved prompt via qwen CLI
+ * Generate improved prompt via Gemini API
  */
-async function generatePromptViaQwen(prompt: string, model: string): Promise<string> {
+async function generatePromptViaGemini(prompt: string, model: string): Promise<string> {
   const logger = getLogger();
-  const cliPath = process.env.AI_CLI_PATH || 'qwen';
+  
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not set');
+  }
+  
+  const geminiModel = model || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
   const timeout = 60000; // 60s for prompt generation
 
-  logger.info({ msg: 'Generating mutation prompt via qwen CLI', model });
+  logger.info({ msg: 'Generating mutation prompt via Gemini API', model: geminiModel });
 
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('Mutation prompt generation timed out'));
-    }, timeout);
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const gemini = genAI.getGenerativeModel({ model: geminiModel });
 
-    const args = [
-      '-p',
-      prompt,
-      '--model',
-      model,
-      '--approval-mode',
-      'yolo',
-    ];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const child = spawn(cliPath, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
+    const result = await gemini.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      },
     });
 
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout?.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      if (code === 0 && stdout) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`Qwen CLI exited with code ${code}: ${stderr}`));
-      }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeoutId);
-      reject(err);
-    });
-  });
+    clearTimeout(timeoutId);
+    const response = await result.response;
+    return response.text().trim();
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error('Mutation prompt generation timed out');
+    }
+    throw error;
+  }
 }
 
 /**

@@ -100,11 +100,8 @@ export function loadConfig(): ArenaConfig {
   const config: ArenaConfig = JSON.parse(raw);
 
   // Override with environment variables where set
-  if (process.env.AI_CLI_PATH) {
-    // Could extend config with CLI path info
-  }
-  if (process.env.AI_CLI_MODEL) {
-    config.agents.initial.forEach(a => (a.model = process.env.AI_CLI_MODEL!));
+  if (process.env.GEMINI_MODEL) {
+    config.agents.initial.forEach(a => (a.model = process.env.GEMINI_MODEL!));
   }
   if (process.env.NY_SESSION_START) {
     config.session.start = process.env.NY_SESSION_START;
@@ -134,8 +131,8 @@ export function loadConfig(): ArenaConfig {
   if (process.env.LOG_LEVEL) {
     config.logging.level = process.env.LOG_LEVEL;
   }
-  if (process.env.AI_CLI_TIMEOUT) {
-    config.scan.agentTimeoutSeconds = parseInt(process.env.AI_CLI_TIMEOUT, 10);
+  if (process.env.GEMINI_TIMEOUT) {
+    config.scan.agentTimeoutSeconds = parseInt(process.env.GEMINI_TIMEOUT, 10);
   }
   if (process.env.CONFLUENCE_THRESHOLD) {
     config.confluenceThreshold = parseInt(process.env.CONFLUENCE_THRESHOLD, 10);

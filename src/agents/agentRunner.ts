@@ -1,9 +1,9 @@
 /**
  * Agent Runner
- * Invokes qwen CLI with system prompt + user payload via child_process
+ * Invokes Gemini API with system prompt + user payload
  */
 
-import { spawn } from 'child_process';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { join } from 'path';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -14,7 +14,7 @@ import type { AgentResponse, Signal } from '../shared/types.js';
 import { SignalSchema } from '../shared/types.js';
 
 /**
- * Run a single agent via qwen CLI
+ * Run a single agent via Gemini API
  */
 export async function runAgent(
   agentId: string,
@@ -33,38 +33,39 @@ export async function runAgent(
   const rootDir = getRootDir();
   const startTime = Date.now();
 
-  const cliPath = process.env.AI_CLI_PATH || 'qwen';
-  const cliModel = model || process.env.AI_CLI_MODEL || 'qwen3.6-plus';
-  const cliApproval = process.env.AI_CLI_APPROVAL_MODE || 'yolo';
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not set');
+  }
+
+  const geminiModel = model || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
   const timeout = (timeoutSeconds || config.scan.agentTimeoutSeconds) * 1000;
 
   logger.info({
     msg: `Running agent: ${agentId}`,
-    model: cliModel,
+    model: geminiModel,
     timeout: `${timeout / 1000}s`,
   });
 
-  // Build text-only prompt (no image — qwen CLI doesn't support large base64 args)
-  const promptContent = buildQwenPrompt({
+  // Build text-only prompt
+  const promptContent = buildGeminiPrompt({
     systemPrompt: payload.systemPrompt,
     userPrompt: payload.userPrompt,
   });
 
   try {
-    // Run qwen CLI with the prompt content as positional argument
-    const result = await runQwenCli(cliPath, cliModel, cliApproval, promptContent, timeout);
+    // Call Gemini API
+    const result = await callGeminiApi(apiKey, geminiModel, promptContent, timeout);
 
     const responseTimeMs = Date.now() - startTime;
 
     // Parse the response
-    const parsed = parseAgentResponse(result.stdout);
+    const parsed = parseAgentResponse(result.output);
 
     if (verbose) {
       logger.info({
         msg: `Agent ${agentId} verbose output`,
-        rawOutput: result.stdout || '(empty)',
-        rawError: result.stderr?.substring(0, 200) || '',
-        exitCode: result.code,
+        rawOutput: result.output || '(empty)',
       });
     }
 
@@ -77,7 +78,7 @@ export async function runAgent(
     return {
       response: parsed,
       responseTimeMs,
-      rawOutput: result.stdout?.substring(0, 1000),
+      rawOutput: result.output?.substring(0, 1000),
     };
   } catch (error: any) {
     const responseTimeMs = Date.now() - startTime;
@@ -96,66 +97,52 @@ export async function runAgent(
 }
 
 /**
- * Build the text prompt for qwen CLI
+ * Build the text prompt for Gemini API
  */
-function buildQwenPrompt(payload: AgentPayload): string {
+function buildGeminiPrompt(payload: AgentPayload): string {
   let content = `<system>\n${payload.systemPrompt}\n</system>\n\n`;
   content += payload.userPrompt;
   return content;
 }
 
 /**
- * Run qwen CLI and capture output
+ * Call Gemini API and capture output
  */
-function runQwenCli(
-  cliPath: string,
+async function callGeminiApi(
+  apiKey: string,
   model: string,
-  approvalMode: string,
   promptContent: string,
   timeout: number
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve, reject) => {
-    let timeoutId: ReturnType<typeof setTimeout>;
+): Promise<{ output: string }> {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const geminiModel = genAI.getGenerativeModel({ model });
 
-    const args = [
-      '--model',
-      model,
-      '--approval-mode',
-      approvalMode,
-      promptContent,
-    ];
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const child = spawn(cliPath, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+  try {
+    const result = await geminiModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: promptContent }] }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      },
     });
 
-    timeoutId = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Agent timed out after ${timeout / 1000}s`));
-    }, timeout);
+    clearTimeout(timeoutId);
+    const response = await result.response;
+    const output = response.text();
 
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout?.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timeoutId);
-      resolve({ stdout, stderr, code: code || 0 });
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeoutId);
-      reject(err);
-    });
-  });
+    return { output };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Agent timed out after ${timeout / 1000}s`);
+    }
+    throw error;
+  }
 }
 
 /**

@@ -76,13 +76,13 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="rounded-full bg-gray-800 px-3 py-1 text-xs text-gray-300">
-              10 Agents
+              5 Agents
             </span>
             <span className="rounded-full bg-orange-900/50 px-3 py-1 text-xs text-orange-300">
               🔒 {activeSignals} Busy
             </span>
             <span className="rounded-full bg-green-900/50 px-3 py-1 text-xs text-green-300">
-              ✅ {10 - activeSignals} Available
+              ✅ {5 - activeSignals} Available
             </span>
             <span className="rounded-full bg-blue-900/50 px-3 py-1 text-xs text-blue-300">
               Threshold: {confluenceThreshold}
@@ -329,11 +329,6 @@ const agentList = [
   { id: 'AGENT-03', strategy: 'LengFX' },
   { id: 'AGENT-04', strategy: 'LazyTrader' },
   { id: 'AGENT-05', strategy: 'SaorchSell 😂' },
-  { id: 'AGENT-06', strategy: 'LoyLong' },
-  { id: 'AGENT-07', strategy: 'OtLuyShort 💀' },
-  { id: 'AGENT-08', strategy: 'HotMargin' },
-  { id: 'AGENT-09', strategy: 'RotSL 😆' },
-  { id: 'AGENT-10', strategy: 'ChnganhProfit' },
 ];
 
 /* ── Signals Page ─────────────────────────────────── */
@@ -1079,11 +1074,6 @@ const strategyDescriptions: Record<string, string> = {
   'AGENT-03': '📈 LengFX — Support & Resistance using key horizontal levels (3+ touches), prior day highs/lows, session extremes, psychological round numbers, and role reversal patterns. Requires rejection candle confirmation.',
   'AGENT-04': '😴 LazyTrader — RSI divergence detection with candlestick confirmation. Only trades when divergence + OB/OS + reversal pattern all align. Lazy but effective — waits for obvious setups.',
   'AGENT-05': '📉 SaorchSell 😂 — MACD momentum using crossovers, histogram divergence, zero-line proximity, and trend alignment. Loves to short but respects data. Requires 5+ of 7 checklist items.',
-  'AGENT-06': '🚀 LoyLong — Trend following via EMA 20/50/200 alignment with higher timeframe confirmation. Prefers pullback entries over crossovers for better R:R. Always loyal to the trend.',
-  'AGENT-07': '💀 OtLuyShort 💀 — Breakout detection with consolidation range mapping, volume spike validation, re-test entries, and measured move targets. Ot Luy = stop loss — always running stops 💀',
-  'AGENT-08': '💰 HotMargin — Mean reversion using Bollinger Band extremes, VWAP deviation, and reversal candle patterns. Critical: avoids trading during strong trends. Fades overextended price back to mean.',
-  'AGENT-09': '🏃 RotSL — Volatility squeeze detection via TTM Squeeze patterns and ATR compression. Rot = run in Khmer. Anticipates expansion moves after low-volatility periods. The stop loss runner 😆',
-  'AGENT-10': '💎 ChnganhProfit — Multi-confluence requiring 3+ independent confirmations from different categories (structure, levels, momentum, trend, volume, pattern). Chnganh = skillful. Only trades when everything aligns.',
 };
 
 /* ── Elimination Page ─────────────────────────────── */
@@ -1439,7 +1429,7 @@ function SystemPage() {
       <div className="mt-4 rounded-lg border border-gray-800 bg-gray-900 p-5">
         <h3 className="mb-3 font-semibold">Recent Events</h3>
         <div className="space-y-2 text-sm">
-          <EventRow time="Just now" event="Database seeded with 10 agents" type="info" />
+          <EventRow time="Just now" event="Database seeded with 5 agents" type="info" />
           <EventRow time="Just now" event="Migrations completed successfully" type="success" />
           <EventRow time="Startup" event="System initialized — waiting for NY session" type="info" />
         </div>
@@ -1466,8 +1456,6 @@ function ChatRoomPage() {
     { id: '1', agentId: null, agentName: 'System', type: 'system', content: '🏛️ Welcome to The Arena Chat Room. Agents will discuss market analysis here.', timestamp: new Date() },
     { id: '2', agentId: 'AGENT-01', agentName: 'ICT Concepts', type: 'analysis', content: 'Watching XAUUSD closely. Price swept sell-side liquidity below Asian low at 2641. Looking for FVG fill on the 5M.', targetAsset: 'XAUUSD', timestamp: new Date(Date.now() - 300000) },
     { id: '3', agentId: 'AGENT-02', agentName: 'Smart Money Concepts', type: 'debate', content: 'Agree on the sweep. I also see a clear CHoCH on 15M — structure shifted bullish. Demand zone at 2643-2645 aligns with the FVG.', targetAsset: 'XAUUSD', timestamp: new Date(Date.now() - 240000) },
-    { id: '4', agentId: 'AGENT-06', agentName: 'Trend Following', type: 'critique', content: 'Both setups look valid, but EMA20 is still below EMA50 on the 1H. Counter-trend risk here. I would wait for EMA alignment before entering.', targetAgentId: 'AGENT-01', targetAsset: 'XAUUSD', timestamp: new Date(Date.now() - 180000) },
-    { id: '5', agentId: 'AGENT-10', agentName: 'Multi-Confluence', type: 'analysis', content: 'Confluences: (1) Liquidity sweep below Asian low, (2) FVG at 2643, (3) RSI divergence on 5M. That is 3 confluences — I am generating a BUY signal.', targetAsset: 'XAUUSD', timestamp: new Date(Date.now() - 120000) },
   ]);
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState<string>('all');
@@ -1564,7 +1552,7 @@ function ChatRoomPage() {
               <option value="farewell">Farewell</option>
               <option value="system">System</option>
             </select>
-            <span className="rounded-full bg-green-900/50 px-3 py-1 text-xs text-green-300">10 agents online</span>
+            <span className="rounded-full bg-green-900/50 px-3 py-1 text-xs text-green-300">5 agents online</span>
           </div>
         </div>
       </div>
@@ -1799,9 +1787,4 @@ const agents = [
   { id: 'AGENT-03', strategy: 'LengFX', promptFile: 'support_resistance.json' },
   { id: 'AGENT-04', strategy: 'LazyTrader', promptFile: 'rsi_price_action.json' },
   { id: 'AGENT-05', strategy: 'SaorchSell 😂', promptFile: 'macd_momentum.json' },
-  { id: 'AGENT-06', strategy: 'LoyLong', promptFile: 'trend_following.json' },
-  { id: 'AGENT-07', strategy: 'OtLuyShort 💀', promptFile: 'breakout_hunter.json' },
-  { id: 'AGENT-08', strategy: 'HotMargin', promptFile: 'mean_reversion.json' },
-  { id: 'AGENT-09', strategy: 'RotSL 😆', promptFile: 'volatility_squeeze.json' },
-  { id: 'AGENT-10', strategy: 'ChnganhProfit', promptFile: 'multi_confluence.json' },
 ];

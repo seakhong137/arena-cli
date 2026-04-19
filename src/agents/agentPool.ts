@@ -1,6 +1,6 @@
 /**
  * Agent Pool Manager
- * Manages all 10 agents, their configurations, and prompt loading
+ * Manages all 5 agents, their configurations, and prompt loading
  */
 
 import { join } from 'path';
